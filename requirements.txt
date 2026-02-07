@@ -1,0 +1,33 @@
+# Antonio Evo - Dependencies
+#
+# CORE (required)
+requests>=2.28.0
+
+# API SERVER (for WebSocket + REST)
+fastapi>=0.100.0
+uvicorn>=0.22.0
+python-multipart>=0.0.6
+
+# CONFIGURATION (for .env support)
+python-dotenv>=1.0.0
+
+# RAG (Retrieval Augmented Generation)
+qdrant-client>=1.7.0
+sentence-transformers>=2.2.0
+
+# IMAGE FEATURES (CLIP + Z-Image)
+# Note: transformers 4.x is required (not 5.x which breaks imports)
+transformers>=4.30.0,<5.0.0
+torch>=2.0.0
+Pillow>=9.0.0
+diffusers>=0.27.0
+accelerate>=0.25.0
+
+# OPTIONAL - External APIs (install only if using fallback)
+# anthropic>=0.18.0
+# openai>=1.0.0
+
+# OPTIONAL - Development
+# pytest>=7.0.0
+# black>=23.0.0
+# mypy>=1.0.0

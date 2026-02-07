@@ -1,0 +1,52 @@
+{
+  "enabled": true,
+  "default_persona": "social",
+
+  "personas": {
+    "social": {
+      "name": "SOCIAL",
+      "description": "Conversational, empathetic, friendly",
+      "system_prompt_path": "prompts/mistral_social.txt",
+      "temperature": 0.7,
+      "max_tokens": 1024,
+      "mood_default": "friendly"
+    },
+    "logic": {
+      "name": "LOGIC",
+      "description": "Analytical, precise, structured",
+      "system_prompt_path": "prompts/mistral_logic.txt",
+      "temperature": 0.3,
+      "max_tokens": 2048,
+      "mood_default": "analytical"
+    }
+  },
+
+  "routing_rules": {
+    "domain_overrides": {
+      "code": "logic",
+      "math": "logic",
+      "analysis": "logic",
+      "data": "logic",
+      "general": "social",
+      "conversation": "social",
+      "creative": "social"
+    },
+    "intent_overrides": {
+      "analysis": "logic",
+      "command": "logic",
+      "conversation": "social",
+      "question": "social"
+    },
+    "allow_user_override": true,
+    "allow_memory_preference": true
+  },
+
+  "keywords": {
+    "social_triggers": [
+      "help me", "explain simply", "eli5", "ciao", "thanks"
+    ],
+    "logic_triggers": [
+      "analyze", "debug", "optimize", "calculate", "step by step"
+    ]
+  }
+}

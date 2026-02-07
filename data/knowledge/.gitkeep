@@ -1,0 +1,3 @@
+# Knowledge Base Directory
+# Place your MD/TXT files here for RAG indexing
+# Run: python -m src.rag.indexer to index documents

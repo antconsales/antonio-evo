@@ -1,0 +1,18 @@
+{
+  "input": {
+    "enabled": false,
+    "engine": "whisper",
+    "model": "base",
+    "language": "auto",
+    "timeout_seconds": 30,
+    "max_duration_seconds": 60,
+    "sample_rate": 16000
+  },
+  "output": {
+    "enabled": false,
+    "engine": "piper",
+    "voice": "en_US-lessac-medium",
+    "speed": 1.0
+  },
+  "_comment": "Voice features are disabled by default. Set enabled to true to activate."
+}

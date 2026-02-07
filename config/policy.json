@@ -1,0 +1,54 @@
+{
+  "max_input_length": 4000,
+  "rate_limits": {
+    "enabled": true,
+    "requests_per_minute": 30,
+    "external_calls_per_hour": 10
+  },
+  "blocked_patterns": [],
+  "validation": {
+    "enabled": true,
+    "max_text_length": 10000,
+    "max_metadata_size": 1000,
+    "max_source_length": 256,
+    "reject_on_failure": true
+  },
+  "sanitization": {
+    "enabled": true,
+    "remove_null_bytes": true,
+    "remove_control_chars": true,
+    "normalize_line_endings": true,
+    "normalize_unicode": true,
+    "collapse_whitespace": true,
+    "max_consecutive_whitespace": 100
+  },
+  "sandbox": {
+    "enabled": true,
+    "enforce_limits": true,
+    "fail_on_violation": true
+  },
+  "plugins": {
+    "enabled": false,
+    "whitelist_path": "config/plugin_whitelist.json",
+    "whitelist_enforced": true,
+    "allow_non_whitelisted": false
+  },
+  "allow_external_fallback": true,
+  "external_triggers": {
+    "min_complexity": "complex",
+    "min_tokens": 4000,
+    "modalities": ["video"]
+  },
+  "audit": {
+    "enabled": true,
+    "log_path": "logs/audit.jsonl",
+    "retention_days": 30,
+    "hash_chain_enabled": true,
+    "verification": {
+      "enabled": true,
+      "verify_on_startup": true,
+      "verify_interval_hours": 24,
+      "fail_on_tamper": true
+    }
+  }
+}

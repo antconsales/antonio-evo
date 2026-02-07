@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "database_path": "data/evomemory.db",
+
+  "retrieval": {
+    "max_neurons": 5,
+    "min_relevance": 0.3,
+    "min_confidence": 0.3,
+    "include_preferences": true,
+    "boost_on_access": 0.02
+  },
+
+  "storage": {
+    "auto_store": true,
+    "min_confidence_to_store": 0.4,
+    "max_neurons": 100000,
+    "cleanup_enabled": true,
+    "cleanup_policy": "oldest_low_confidence",
+    "cleanup_days_old": 30,
+    "cleanup_min_confidence": 0.3
+  },
+
+  "learning": {
+    "enabled": true,
+    "confidence_decay_enabled": false,
+    "confidence_decay_days": 30,
+    "confidence_decay_rate": 0.01,
+    "learn_preferences": true,
+    "preference_confidence_threshold": 0.7
+  },
+
+  "session": {
+    "enabled": true,
+    "auto_create": true,
+    "timeout_minutes": 30
+  }
+}

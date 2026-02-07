@@ -1,0 +1,5 @@
+{
+    "enabled": true,
+    "allowed_plugins": [],
+    "_comment": "Add plugin IDs to allowed_plugins to enable them. Example: [\"example-plugin\", \"text-analyzer\"]"
+}

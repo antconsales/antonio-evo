@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, ExternalLink, AlertCircle } from 'lucide-react';
+import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, ExternalLink, AlertCircle, Webhook, Play, Loader2, Search, Globe } from 'lucide-react';
+import { useTranslation } from '../i18n';
 
 function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
   const [localSettings, setLocalSettings] = useState(settings);
   const [serverInfo, setServerInfo] = useState(null);
   const [activeTab, setActiveTab] = useState('general');
+  const { t, language, changeLanguage } = useTranslation();
 
   // API Keys state
   const [apiKeys, setApiKeys] = useState([]);
@@ -23,10 +25,26 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
   const [showApiKey, setShowApiKey] = useState({});
   const [newCustomApi, setNewCustomApi] = useState({ name: '', baseUrl: '', apiKey: '', model: '' });
 
+  // Webhooks state
+  const [webhooks, setWebhooks] = useState([]);
+  const [newWebhook, setNewWebhook] = useState({ name: '', url: '', trigger: 'post_response' });
+  const [webhookTestStatus, setWebhookTestStatus] = useState({});
+  const [webhookTestLoading, setWebhookTestLoading] = useState({});
+
+  // Web Search state
+  const [webSearchConfig, setWebSearchConfig] = useState({ api_key: '', auto_search: false, available: false });
+  const [webSearchApiKey, setWebSearchApiKey] = useState('');
+  const [webSearchAutoSearch, setWebSearchAutoSearch] = useState(false);
+  const [webSearchTestResult, setWebSearchTestResult] = useState(null);
+  const [webSearchTestLoading, setWebSearchTestLoading] = useState(false);
+  const [showWebSearchKey, setShowWebSearchKey] = useState(false);
+
   useEffect(() => {
     loadServerInfo();
     loadApiKeys();
     loadExternalApis();
+    loadWebhooks();
+    loadWebSearchConfig();
   }, []);
 
   const loadServerInfo = async () => {
@@ -161,6 +179,130 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
     localStorage.setItem('antonio_external_apis', JSON.stringify(newApis));
   };
 
+  // === Webhook functions ===
+  const loadWebhooks = async () => {
+    try {
+      const res = await fetch('http://localhost:8420/api/webhooks');
+      const data = await res.json();
+      if (data.success) {
+        setWebhooks(data.webhooks || []);
+      }
+    } catch (e) {
+      console.error('Failed to load webhooks:', e);
+    }
+  };
+
+  const addWebhookHandler = async () => {
+    if (!newWebhook.name.trim() || !newWebhook.url.trim()) return;
+    try {
+      const res = await fetch('http://localhost:8420/api/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newWebhook)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWebhooks([...webhooks, data.webhook]);
+        setNewWebhook({ name: '', url: '', trigger: 'post_response' });
+      }
+    } catch (e) {
+      console.error('Failed to add webhook:', e);
+    }
+  };
+
+  const toggleWebhook = async (webhookId, enabled) => {
+    try {
+      const res = await fetch(`http://localhost:8420/api/webhooks/${webhookId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWebhooks(webhooks.map(w => w.id === webhookId ? { ...w, enabled } : w));
+      }
+    } catch (e) {
+      console.error('Failed to toggle webhook:', e);
+    }
+  };
+
+  const deleteWebhook = async (webhookId) => {
+    try {
+      await fetch(`http://localhost:8420/api/webhooks/${webhookId}`, { method: 'DELETE' });
+      setWebhooks(webhooks.filter(w => w.id !== webhookId));
+    } catch (e) {
+      console.error('Failed to delete webhook:', e);
+    }
+  };
+
+  const testWebhook = async (webhookId) => {
+    setWebhookTestLoading(prev => ({ ...prev, [webhookId]: true }));
+    setWebhookTestStatus(prev => ({ ...prev, [webhookId]: null }));
+    try {
+      const res = await fetch(`http://localhost:8420/api/webhooks/${webhookId}/test`, { method: 'POST' });
+      const data = await res.json();
+      setWebhookTestStatus(prev => ({ ...prev, [webhookId]: data.success ? 'success' : 'error' }));
+    } catch (e) {
+      setWebhookTestStatus(prev => ({ ...prev, [webhookId]: 'error' }));
+    }
+    setWebhookTestLoading(prev => ({ ...prev, [webhookId]: false }));
+    setTimeout(() => {
+      setWebhookTestStatus(prev => ({ ...prev, [webhookId]: null }));
+    }, 5000);
+  };
+
+  // === Web Search functions ===
+  const loadWebSearchConfig = async () => {
+    try {
+      const res = await fetch('http://localhost:8420/api/web-search/status');
+      const data = await res.json();
+      setWebSearchConfig(data);
+      setWebSearchApiKey(data.has_api_key ? '••••••••' : '');
+      setWebSearchAutoSearch(data.auto_search || false);
+    } catch (e) {
+      console.error('Failed to load web search config:', e);
+    }
+  };
+
+  const saveWebSearchConfig = async () => {
+    try {
+      const body = { auto_search: webSearchAutoSearch };
+      // Only send api_key if user entered a new one (not the masked placeholder)
+      if (webSearchApiKey && !webSearchApiKey.startsWith('••')) {
+        body.api_key = webSearchApiKey;
+      }
+      const res = await fetch('http://localhost:8420/api/web-search/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadWebSearchConfig();
+      }
+    } catch (e) {
+      console.error('Failed to save web search config:', e);
+    }
+  };
+
+  const testWebSearch = async () => {
+    setWebSearchTestLoading(true);
+    setWebSearchTestResult(null);
+    try {
+      const res = await fetch('http://localhost:8420/api/web-search/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'test search' })
+      });
+      const data = await res.json();
+      setWebSearchTestResult(data);
+    } catch (e) {
+      setWebSearchTestResult({ success: false, error: 'Connection error' });
+    }
+    setWebSearchTestLoading(false);
+    setTimeout(() => setWebSearchTestResult(null), 8000);
+  };
+
   const handleChange = (key, value) => {
     const newSettings = { ...localSettings, [key]: value };
     setLocalSettings(newSettings);
@@ -175,7 +317,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
   return (
     <div className="settings-panel">
       <div className="settings-header">
-        <h2>Settings</h2>
+        <h2>{t('settings.title')}</h2>
         <button className="close-btn" onClick={onClose}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M18 6L6 18M6 6l12 12" />
@@ -189,19 +331,25 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
           className={`settings-tab ${activeTab === 'general' ? 'active' : ''}`}
           onClick={() => setActiveTab('general')}
         >
-          General
+          {t('settings.general')}
         </button>
         <button
           className={`settings-tab ${activeTab === 'apikeys' ? 'active' : ''}`}
           onClick={() => setActiveTab('apikeys')}
         >
-          API Keys
+          {t('settings.apiKeys')}
         </button>
         <button
           className={`settings-tab ${activeTab === 'external' ? 'active' : ''}`}
           onClick={() => setActiveTab('external')}
         >
-          External APIs
+          {t('settings.externalApis')}
+        </button>
+        <button
+          className={`settings-tab ${activeTab === 'webhooks' ? 'active' : ''}`}
+          onClick={() => setActiveTab('webhooks')}
+        >
+          {t('settings.webhooks')}
         </button>
       </div>
 
@@ -209,28 +357,49 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
         {/* General Tab */}
         {activeTab === 'general' && (
           <>
-            {/* Connection Section */}
+            {/* Language Section */}
             <section className="settings-section">
-              <h3>Connection</h3>
+              <h3>{t('settings.language')}</h3>
               <div className="setting-item">
                 <div className="setting-info">
-                  <label>API Server Status</label>
-                  <p className="setting-description">Connection to Antonio backend</p>
+                  <label>{t('settings.uiLanguage')}</label>
+                  <p className="setting-description">{t('settings.uiLanguageDesc')}</p>
+                </div>
+                <select
+                  value={language}
+                  onChange={(e) => changeLanguage(e.target.value)}
+                  className="language-select"
+                >
+                  <option value="en">English</option>
+                  <option value="it">Italiano</option>
+                  <option value="fr">Fran&#231;ais</option>
+                  <option value="es">Espa&#241;ol</option>
+                </select>
+              </div>
+            </section>
+
+            {/* Connection Section */}
+            <section className="settings-section">
+              <h3>{t('settings.connection')}</h3>
+              <div className="setting-item">
+                <div className="setting-info">
+                  <label>{t('settings.apiServerStatus')}</label>
+                  <p className="setting-description">{t('settings.connectionToBackend')}</p>
                 </div>
                 <div className={`status-indicator ${isConnected ? 'connected' : 'disconnected'}`}>
-                  {isConnected ? 'Connected' : 'Disconnected'}
+                  {isConnected ? t('settings.connected') : t('settings.disconnected')}
                 </div>
               </div>
 
               {serverInfo && (
                 <div className="server-info-card">
                   <div className="info-row">
-                    <span>Status</span>
+                    <span>{t('settings.serverStatus')}</span>
                     <span>{serverInfo.status}</span>
                   </div>
                   <div className="info-row">
-                    <span>LLM Available</span>
-                    <span>{serverInfo.llm_available ? 'Yes' : 'No'}</span>
+                    <span>{t('settings.llmAvailable')}</span>
+                    <span>{serverInfo.llm_available ? t('settings.yes') : t('settings.no')}</span>
                   </div>
                 </div>
               )}
@@ -238,11 +407,11 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
 
             {/* Voice Section */}
             <section className="settings-section">
-              <h3>Voice</h3>
+              <h3>{t('settings.voice')}</h3>
               <div className="setting-item">
                 <div className="setting-info">
-                  <label>Speak Responses</label>
-                  <p className="setting-description">Read responses aloud using text-to-speech</p>
+                  <label>{t('settings.speakResponses')}</label>
+                  <p className="setting-description">{t('settings.speakResponsesDesc')}</p>
                 </div>
                 <label className="toggle">
                   <input
@@ -255,13 +424,124 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
               </div>
             </section>
 
-            {/* Real-time Section */}
+            {/* AI Reasoning */}
             <section className="settings-section">
-              <h3>Real-time</h3>
+              <h3>{t('settings.aiReasoning')}</h3>
               <div className="setting-item">
                 <div className="setting-info">
-                  <label>WebSocket Connection</label>
-                  <p className="setting-description">Use real-time WebSocket for faster responses</p>
+                  <label>{t('settings.deepThinking')}</label>
+                  <p className="setting-description">{t('settings.deepThinkingDesc')}</p>
+                </div>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.deepThinking}
+                    onChange={(e) => handleChange('deepThinking', e.target.checked)}
+                  />
+                  <span className="toggle-slider"></span>
+                </label>
+              </div>
+            </section>
+
+            {/* Web Search Section */}
+            <section className="settings-section">
+              <h3><Globe size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />{t('settings.webSearch')}</h3>
+              <p className="section-description">
+                {t('settings.webSearchDesc')}
+              </p>
+
+              {/* Status indicator */}
+              <div className="setting-item">
+                <div className="setting-info">
+                  <label>{t('settings.webSearchStatus')}</label>
+                </div>
+                <div className={`status-indicator ${webSearchConfig.available ? 'connected' : 'disconnected'}`}>
+                  {webSearchConfig.available ? t('settings.webSearchConfigured') : t('settings.webSearchNotConfigured')}
+                </div>
+              </div>
+
+              {/* API Key input */}
+              <div className="setting-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+                <div className="setting-info">
+                  <label>{t('settings.webSearchApiKey')}</label>
+                  <p className="setting-description">{t('settings.webSearchGetKey')}</p>
+                </div>
+                <div className="key-input-wrapper">
+                  <input
+                    type={showWebSearchKey ? 'text' : 'password'}
+                    value={webSearchApiKey}
+                    onChange={(e) => setWebSearchApiKey(e.target.value)}
+                    placeholder={t('settings.webSearchApiKeyPlaceholder')}
+                    onFocus={() => { if (webSearchApiKey.startsWith('••')) setWebSearchApiKey(''); }}
+                  />
+                  <button
+                    className="toggle-visibility"
+                    onClick={() => setShowWebSearchKey(!showWebSearchKey)}
+                  >
+                    {showWebSearchKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Auto Search toggle */}
+              <div className="setting-item">
+                <div className="setting-info">
+                  <label>{t('settings.webSearchAutoSearch')}</label>
+                  <p className="setting-description">{t('settings.webSearchAutoSearchDesc')}</p>
+                </div>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={webSearchAutoSearch}
+                    onChange={(e) => setWebSearchAutoSearch(e.target.checked)}
+                  />
+                  <span className="toggle-slider"></span>
+                </label>
+              </div>
+
+              {/* Save + Test buttons */}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <button
+                  className="add-api-btn"
+                  onClick={saveWebSearchConfig}
+                >
+                  {t('settings.webSearchSave')}
+                </button>
+                <button
+                  className={`add-api-btn ${webSearchTestResult?.success ? 'success' : webSearchTestResult && !webSearchTestResult.success ? 'danger' : ''}`}
+                  onClick={testWebSearch}
+                  disabled={webSearchTestLoading || !webSearchConfig.available}
+                  style={{ background: webSearchTestResult?.success ? '#22c55e' : webSearchTestResult && !webSearchTestResult.success ? '#ef4444' : undefined }}
+                >
+                  {webSearchTestLoading ? (
+                    <><Loader2 size={16} className="spinning" /> {t('settings.webSearchTesting')}</>
+                  ) : (
+                    <><Search size={16} /> {t('settings.webSearchTest')}</>
+                  )}
+                </button>
+              </div>
+
+              {/* Test result feedback */}
+              {webSearchTestResult && (
+                <div className={`new-key-alert ${webSearchTestResult.success ? '' : 'error'}`} style={{ marginTop: '8px' }}>
+                  <AlertCircle size={18} />
+                  <span>
+                    {webSearchTestResult.success
+                      ? t('settings.webSearchTestSuccess', { count: webSearchTestResult.results_count || 0 })
+                      : t('settings.webSearchTestError', { error: webSearchTestResult.error || 'Unknown error' })
+                    }
+                  </span>
+                </div>
+              )}
+            </section>
+
+            {/* Real-time Section */}
+            <section className="settings-section">
+              <h3>{t('settings.realtime')}</h3>
+              <div className="setting-item">
+                <div className="setting-info">
+                  <label>{t('settings.websocketConnection')}</label>
+                  <p className="setting-description">{t('settings.websocketDesc')}</p>
                 </div>
                 <label className="toggle">
                   <input
@@ -274,8 +554,8 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
               </div>
               <div className="setting-item">
                 <div className="setting-info">
-                  <label>Avatar Companion</label>
-                  <p className="setting-description">Show floating avatar assistant</p>
+                  <label>{t('settings.avatarCompanion')}</label>
+                  <p className="setting-description">{t('settings.avatarCompanionDesc')}</p>
                 </div>
                 <label className="toggle">
                   <input
@@ -290,11 +570,11 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
 
             {/* Appearance Section */}
             <section className="settings-section">
-              <h3>Appearance</h3>
+              <h3>{t('settings.appearance')}</h3>
               <div className="setting-item">
                 <div className="setting-info">
-                  <label>Dark Mode</label>
-                  <p className="setting-description">Use dark color scheme</p>
+                  <label>{t('settings.darkMode')}</label>
+                  <p className="setting-description">{t('settings.darkModeDesc')}</p>
                 </div>
                 <label className="toggle">
                   <input
@@ -309,14 +589,14 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
 
             {/* About Section */}
             <section className="settings-section">
-              <h3>About</h3>
+              <h3>{t('settings.about')}</h3>
               <div className="about-card">
                 <div className="about-logo">A</div>
                 <div className="about-info">
                   <h4>Antonio Evo</h4>
-                  <p>Version 4.0.0</p>
+                  <p>{t('settings.version', { version: '4.0.0' })}</p>
                   <p className="about-description">
-                    Local AI assistant with evolutionary memory. Learns from interactions, never forgets, completely private.
+                    {t('settings.aboutDescription')}
                   </p>
                 </div>
               </div>
@@ -328,9 +608,9 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
         {activeTab === 'apikeys' && (
           <>
             <section className="settings-section">
-              <h3>Antonio Evo API Keys</h3>
+              <h3>{t('settings.antonioApiKeys')}</h3>
               <p className="section-description">
-                Generate API keys to access Antonio Evo programmatically. Keep your keys secure.
+                {t('settings.apiKeysDescription')}
               </p>
 
               {/* New Key Alert */}
@@ -338,8 +618,8 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                 <div className="new-key-alert">
                   <AlertCircle size={20} />
                   <div className="new-key-content">
-                    <strong>Save your new API key</strong>
-                    <p>This key will only be shown once. Copy it now.</p>
+                    <strong>{t('settings.saveNewApiKey')}</strong>
+                    <p>{t('settings.keyShownOnce')}</p>
                     <code>{showNewKey}</code>
                   </div>
                   <button
@@ -358,7 +638,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
               <div className="create-key-form">
                 <input
                   type="text"
-                  placeholder="Key name (e.g., Production, Development)"
+                  placeholder={t('settings.keyNamePlaceholder')}
                   value={newKeyName}
                   onChange={(e) => setNewKeyName(e.target.value)}
                   className="key-name-input"
@@ -369,7 +649,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                   disabled={!newKeyName.trim()}
                 >
                   <Plus size={16} />
-                  Generate Key
+                  {t('settings.generateKey')}
                 </button>
               </div>
 
@@ -378,8 +658,8 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                 {apiKeys.length === 0 ? (
                   <div className="empty-keys">
                     <Key size={32} />
-                    <p>No API keys yet</p>
-                    <span>Create your first API key to get started</span>
+                    <p>{t('settings.noApiKeys')}</p>
+                    <span>{t('settings.createFirstKey')}</span>
                   </div>
                 ) : (
                   apiKeys.map((key) => (
@@ -388,21 +668,21 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                         <span className="key-name">{key.name}</span>
                         <span className="key-value">{maskApiKey(key.key)}</span>
                         <span className="key-date">
-                          Created {new Date(key.created).toLocaleDateString()}
+                          {t('settings.created', { date: new Date(key.created).toLocaleDateString() })}
                         </span>
                       </div>
                       <div className="key-actions">
                         <button
                           className="key-action-btn"
                           onClick={() => copyToClipboard(key.key, key.id)}
-                          title="Copy key"
+                          title={t('message.copyKey')}
                         >
                           {copiedKey === key.id ? <Check size={16} /> : <Copy size={16} />}
                         </button>
                         <button
                           className="key-action-btn danger"
                           onClick={() => deleteApiKey(key.id)}
-                          title="Delete key"
+                          title={t('message.deleteKey')}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -414,9 +694,9 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
             </section>
 
             <section className="settings-section">
-              <h3>API Documentation</h3>
+              <h3>{t('settings.apiDocumentation')}</h3>
               <div className="api-docs-card">
-                <p>Use your API key to authenticate requests:</p>
+                <p>{t('settings.apiDocDesc')}</p>
                 <code className="code-block">
                   curl -X POST http://localhost:8420/api/ask \<br />
                   {'  '}-H "Authorization: Bearer YOUR_API_KEY" \<br />
@@ -432,9 +712,9 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
         {activeTab === 'external' && (
           <>
             <section className="settings-section">
-              <h3>External LLM Providers</h3>
+              <h3>{t('settings.externalLlmProviders')}</h3>
               <p className="section-description">
-                Connect external AI providers for hybrid mode or fallback capabilities.
+                {t('settings.externalLlmDesc')}
               </p>
 
               {/* OpenAI */}
@@ -456,7 +736,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                 {externalApis.openai?.enabled && (
                   <div className="api-config">
                     <div className="config-row">
-                      <label>API Key</label>
+                      <label>{t('settings.apiKey')}</label>
                       <div className="key-input-wrapper">
                         <input
                           type={showApiKey.openai ? 'text' : 'password'}
@@ -473,7 +753,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                       </div>
                     </div>
                     <div className="config-row">
-                      <label>Model</label>
+                      <label>{t('settings.model')}</label>
                       <select
                         value={externalApis.openai?.model || 'gpt-4'}
                         onChange={(e) => updateExternalApi('openai', { model: e.target.value })}
@@ -506,7 +786,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                 {externalApis.anthropic?.enabled && (
                   <div className="api-config">
                     <div className="config-row">
-                      <label>API Key</label>
+                      <label>{t('settings.apiKey')}</label>
                       <div className="key-input-wrapper">
                         <input
                           type={showApiKey.anthropic ? 'text' : 'password'}
@@ -523,7 +803,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                       </div>
                     </div>
                     <div className="config-row">
-                      <label>Model</label>
+                      <label>{t('settings.model')}</label>
                       <select
                         value={externalApis.anthropic?.model || 'claude-3-opus-20240229'}
                         onChange={(e) => updateExternalApi('anthropic', { model: e.target.value })}
@@ -556,7 +836,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                 {externalApis.google?.enabled && (
                   <div className="api-config">
                     <div className="config-row">
-                      <label>API Key</label>
+                      <label>{t('settings.apiKey')}</label>
                       <div className="key-input-wrapper">
                         <input
                           type={showApiKey.google ? 'text' : 'password'}
@@ -573,7 +853,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                       </div>
                     </div>
                     <div className="config-row">
-                      <label>Model</label>
+                      <label>{t('settings.model')}</label>
                       <select
                         value={externalApis.google?.model || 'gemini-pro'}
                         onChange={(e) => updateExternalApi('google', { model: e.target.value })}
@@ -589,9 +869,9 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
 
             {/* Custom APIs */}
             <section className="settings-section">
-              <h3>Custom API Endpoints</h3>
+              <h3>{t('settings.customApiEndpoints')}</h3>
               <p className="section-description">
-                Add your own OpenAI-compatible API endpoints (Ollama, LM Studio, etc.)
+                {t('settings.customApiDesc')}
               </p>
 
               {/* Custom APIs List */}
@@ -611,36 +891,36 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                   </div>
                   <div className="api-details">
                     <span><ExternalLink size={12} /> {api.baseUrl}</span>
-                    {api.model && <span>Model: {api.model}</span>}
+                    {api.model && <span>{t('settings.model')}: {api.model}</span>}
                   </div>
                 </div>
               ))}
 
               {/* Add Custom API Form */}
               <div className="add-custom-api">
-                <h4>Add Custom Endpoint</h4>
+                <h4>{t('settings.addCustomEndpoint')}</h4>
                 <div className="custom-api-form">
                   <input
                     type="text"
-                    placeholder="Name (e.g., Ollama Local)"
+                    placeholder={t('settings.namePlaceholder')}
                     value={newCustomApi.name}
                     onChange={(e) => setNewCustomApi({ ...newCustomApi, name: e.target.value })}
                   />
                   <input
                     type="text"
-                    placeholder="Base URL (e.g., http://localhost:11434)"
+                    placeholder={t('settings.baseUrlPlaceholder')}
                     value={newCustomApi.baseUrl}
                     onChange={(e) => setNewCustomApi({ ...newCustomApi, baseUrl: e.target.value })}
                   />
                   <input
                     type="text"
-                    placeholder="Model (e.g., llama2)"
+                    placeholder={t('settings.modelPlaceholder')}
                     value={newCustomApi.model}
                     onChange={(e) => setNewCustomApi({ ...newCustomApi, model: e.target.value })}
                   />
                   <input
                     type="password"
-                    placeholder="API Key (optional)"
+                    placeholder={t('settings.apiKeyOptional')}
                     value={newCustomApi.apiKey}
                     onChange={(e) => setNewCustomApi({ ...newCustomApi, apiKey: e.target.value })}
                   />
@@ -650,8 +930,136 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                     disabled={!newCustomApi.name || !newCustomApi.baseUrl}
                   >
                     <Plus size={16} />
-                    Add Endpoint
+                    {t('settings.addEndpoint')}
                   </button>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* Webhooks Tab */}
+        {activeTab === 'webhooks' && (
+          <>
+            <section className="settings-section">
+              <h3>{t('settings.n8nWebhooks')}</h3>
+              <p className="section-description">
+                {t('settings.webhooksDesc')}
+              </p>
+
+              {/* Webhooks List */}
+              {webhooks.length === 0 ? (
+                <div className="empty-keys">
+                  <Webhook size={32} />
+                  <p>{t('settings.noWebhooks')}</p>
+                  <span>{t('settings.addFirstWebhook')}</span>
+                </div>
+              ) : (
+                <div className="api-keys-list">
+                  {webhooks.map((wh) => (
+                    <div key={wh.id} className="external-api-card">
+                      <div className="api-header">
+                        <div className="api-title">
+                          <span className={`webhook-status-dot ${wh.enabled ? 'active' : 'inactive'}`} />
+                          <span>{wh.name}</span>
+                          <span className="webhook-trigger-badge">{wh.trigger}</span>
+                        </div>
+                        <label className="toggle">
+                          <input
+                            type="checkbox"
+                            checked={wh.enabled}
+                            onChange={(e) => toggleWebhook(wh.id, e.target.checked)}
+                          />
+                          <span className="toggle-slider"></span>
+                        </label>
+                      </div>
+                      <div className="api-details" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <ExternalLink size={12} /> {wh.url}
+                        </span>
+                        <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
+                          <button
+                            className={`key-action-btn ${webhookTestStatus[wh.id] === 'success' ? 'success' : webhookTestStatus[wh.id] === 'error' ? 'danger' : ''}`}
+                            onClick={() => testWebhook(wh.id)}
+                            disabled={webhookTestLoading[wh.id]}
+                            title={t('settings.testWebhook')}
+                          >
+                            {webhookTestLoading[wh.id] ? <Loader2 size={16} className="spinning" /> :
+                              webhookTestStatus[wh.id] === 'success' ? <Check size={16} /> :
+                              <Play size={16} />}
+                          </button>
+                          <button
+                            className="key-action-btn danger"
+                            onClick={() => deleteWebhook(wh.id)}
+                            title={t('settings.deleteWebhook')}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Add Webhook Form */}
+            <section className="settings-section">
+              <h3>{t('settings.addWebhook')}</h3>
+              <div className="add-custom-api">
+                <div className="custom-api-form">
+                  <input
+                    type="text"
+                    placeholder={t('settings.webhookNamePlaceholder')}
+                    value={newWebhook.name}
+                    onChange={(e) => setNewWebhook({ ...newWebhook, name: e.target.value })}
+                  />
+                  <input
+                    type="text"
+                    placeholder={t('settings.webhookUrlPlaceholder')}
+                    value={newWebhook.url}
+                    onChange={(e) => setNewWebhook({ ...newWebhook, url: e.target.value })}
+                  />
+                  <select
+                    value={newWebhook.trigger}
+                    onChange={(e) => setNewWebhook({ ...newWebhook, trigger: e.target.value })}
+                  >
+                    <option value="post_response">{t('settings.afterResponse')}</option>
+                    <option value="on_memory">{t('settings.onMemoryCreate')}</option>
+                    <option value="on_error">{t('settings.onError')}</option>
+                    <option value="manual">{t('settings.manualTrigger')}</option>
+                  </select>
+                  <button
+                    className="add-api-btn"
+                    onClick={addWebhookHandler}
+                    disabled={!newWebhook.name.trim() || !newWebhook.url.trim()}
+                  >
+                    <Plus size={16} />
+                    {t('settings.addWebhookBtn')}
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Webhook Docs */}
+            <section className="settings-section">
+              <h3>{t('settings.howItWorks')}</h3>
+              <div className="api-docs-card">
+                <p>{t('settings.webhookDocDesc')}</p>
+                <code className="code-block" style={{ fontSize: '0.8em' }}>
+                  {'{'}<br />
+                  {'  '}"type": "post_response",<br />
+                  {'  '}"source": "antonio-evo",<br />
+                  {'  '}"timestamp": "2026-02-13T...",<br />
+                  {'  '}"data": {'{'} "request_text": "...", "response_text": "...", "elapsed_ms": 42 {'}'}<br />
+                  {'}'}
+                </code>
+                <div style={{ marginTop: '12px', fontSize: '0.85em', color: 'var(--text-secondary)' }}>
+                  <strong>{t('settings.triggerTypes')}</strong><br />
+                  <span>{t('settings.afterResponse')}</span> - {t('settings.triggerAfterResponse')}<br />
+                  <span>{t('settings.onMemoryCreate')}</span> - {t('settings.triggerOnMemory')}<br />
+                  <span>{t('settings.onError')}</span> - {t('settings.triggerOnError')}<br />
+                  <span>{t('settings.manualTrigger')}</span> - {t('settings.triggerManual')}
                 </div>
               </div>
             </section>

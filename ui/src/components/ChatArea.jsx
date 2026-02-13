@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import VoiceButton from './VoiceButton';
 import { Paperclip, Send, X, Image, FileText, File } from 'lucide-react';
+import { useTranslation } from '../i18n';
 
 function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
   const [input, setInput] = useState('');
@@ -9,6 +10,7 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const { t } = useTranslation();
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -132,17 +134,17 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
         {messages.length === 0 ? (
           <div className="welcome-screen">
             <div className="welcome-logo">A</div>
-            <h1>Antonio</h1>
-            <p>Your local AI assistant</p>
+            <h1>{t('chat.antonio')}</h1>
+            <p>{t('chat.yourLocalAssistant')}</p>
             <div className="welcome-suggestions">
-              <button onClick={() => onSendMessage('What can you help me with?')}>
-                What can you help me with?
+              <button onClick={() => onSendMessage(t('chat.suggestionHelp'))}>
+                {t('chat.suggestionHelp')}
               </button>
-              <button onClick={() => onSendMessage('Tell me about yourself')}>
-                Tell me about yourself
+              <button onClick={() => onSendMessage(t('chat.suggestionAbout'))}>
+                {t('chat.suggestionAbout')}
               </button>
-              <button onClick={() => onSendMessage('What time is it?')}>
-                What time is it?
+              <button onClick={() => onSendMessage(t('chat.suggestionTime'))}>
+                {t('chat.suggestionTime')}
               </button>
             </div>
           </div>
@@ -174,8 +176,19 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
           <div className="attachments-preview">
             {attachments.map((att) => (
               <div key={att.id} className="attachment-preview-item">
-                {att.preview ? (
-                  <img src={att.preview} alt={att.name} className="attachment-thumbnail" />
+                {att.type?.startsWith('image/') ? (
+                  <img
+                    src={att.data || att.preview}
+                    alt={att.name}
+                    className="attachment-thumbnail"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.replaceWith(Object.assign(document.createElement('div'), {
+                        className: 'attachment-icon',
+                        innerHTML: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>',
+                      }));
+                    }}
+                  />
                 ) : (
                   <div className="attachment-icon">{getFileIcon(att.type)}</div>
                 )}
@@ -186,7 +199,7 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
                 <button
                   className="attachment-remove"
                   onClick={() => removeAttachment(att.id)}
-                  title="Remove attachment"
+                  title={t('chat.removeAttachment')}
                 >
                   <X size={14} />
                 </button>
@@ -213,7 +226,7 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
               className="attach-btn"
               onClick={() => fileInputRef.current?.click()}
               disabled={!isConnected || isLoading}
-              title="Attach files (or drag & drop)"
+              title={t('chat.attachFiles')}
             >
               <Paperclip size={20} />
             </button>
@@ -223,7 +236,7 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isConnected ? 'Type a message...' : 'Connecting to server...'}
+              placeholder={isConnected ? t('chat.typeMessage') : t('chat.connectingToServer')}
               disabled={!isConnected || isLoading}
               rows={1}
             />
@@ -240,8 +253,8 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
           </div>
         </form>
         <p className="input-hint">
-          Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new line
-          {attachments.length > 0 && ` • ${attachments.length} file(s) attached`}
+          {t('chat.hintSend')} <kbd>{t('chat.hintEnter')}</kbd> {t('chat.hintToSend')} <kbd>{t('chat.hintShiftEnter')}</kbd> {t('chat.hintNewLine')}
+          {attachments.length > 0 && ` • ${t('chat.filesAttached', { count: attachments.length })}`}
         </p>
       </div>
     </div>

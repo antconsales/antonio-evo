@@ -105,6 +105,7 @@ Classify this input. Respond with JSON:
                     "prompt": prompt,
                     "system": self._system_prompt,
                     "stream": False,
+                    "think": False,  # Disable thinking for fast classification
                     "options": {
                         "temperature": 0.1,  # Very low for determinism
                         "num_predict": 256

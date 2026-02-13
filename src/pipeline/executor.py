@@ -1,0 +1,323 @@
+"""
+Pipeline Executor - The deterministic 8-step processing pipeline.
+
+Extracted from Orchestrator to follow Single Responsibility Principle.
+
+Flow (deterministic, no exceptions):
+1. Normalize input -> Request
+2. Retrieve memory context -> MemoryContext
+3. Get emotional context (v2.1)
+4. Classify intent (memory-informed) -> Classification
+5. Apply policy -> PolicyDecision
+6. Route to handler -> Response
+7. Create neuron + post-processing (emotional, proactive, digital twin)
+8. Log to audit trail
+"""
+
+import time
+import logging
+from typing import Dict, Any, Union, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class PipelineExecutor:
+    """
+    Executes the deterministic request processing pipeline.
+
+    All components are injected via constructor - no hidden dependencies.
+    """
+
+    def __init__(
+        self,
+        normalizer,
+        classifier,
+        policy,
+        router,
+        response_builder,
+        audit,
+        session_manager,
+        memory_enabled: bool = False,
+        memory_retriever=None,
+        neuron_creator=None,
+        emotional_memory=None,
+        proactive_service=None,
+        digital_twin=None,
+        webhook_service=None,
+        web_search_service=None,
+    ):
+        """
+        Initialize pipeline with all required components.
+
+        All parameters are injected - no internal instantiation.
+        """
+        self.normalizer = normalizer
+        self.classifier = classifier
+        self.policy = policy
+        self.router = router
+        self.response_builder = response_builder
+        self.audit = audit
+        self.session_manager = session_manager
+
+        # Optional memory components
+        self.memory_enabled = memory_enabled
+        self.memory_retriever = memory_retriever
+        self.neuron_creator = neuron_creator
+        self.emotional_memory = emotional_memory
+        self.proactive_service = proactive_service
+        self.digital_twin = digital_twin
+
+        # Webhook service (n8n integration)
+        self.webhook_service = webhook_service
+
+        # Web search service (Tavily)
+        self.web_search_service = web_search_service
+
+    def execute(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Process a single request through the 8-step pipeline.
+
+        SYNCHRONOUS. One request in, one response out.
+        No async, no callbacks, no side effects beyond audit log and memory.
+        """
+        start_time = time.time()
+        memory_operation = None
+
+        # === STEP 1: Normalize ===
+        norm_result = self.normalizer.normalize(raw_input)
+
+        if not norm_result.success:
+            return {
+                "success": False,
+                "error": "; ".join([e.message for e in norm_result.errors]),
+                "error_code": norm_result.error_code,
+                "elapsed_ms": int((time.time() - start_time) * 1000),
+            }
+
+        request = norm_result.request
+
+        # Attach session ID
+        request.session_id = self.session_manager.current_session_id
+
+        # === STEP 2: Memory Retrieval ===
+        if self.memory_enabled and self.memory_retriever:
+            try:
+                memory_context = self.memory_retriever.retrieve(
+                    query=request.text,
+                    session_id=request.session_id,
+                )
+                request.memory_context = memory_context
+            except Exception:
+                request.memory_context = None
+
+        # === STEP 2.1: Emotional Context (v2.1) ===
+        emotional_context = None
+        if self.memory_enabled and self.emotional_memory:
+            try:
+                emotional_context = self.emotional_memory.get_emotional_context(
+                    message=request.text,
+                    session_id=request.session_id,
+                )
+                request.emotional_context = emotional_context
+            except Exception:
+                request.emotional_context = None
+
+        # === STEP 2.5: Preprocess Image Attachments ===
+        # Analyze images BEFORE routing to avoid sandbox subprocess issues
+        # (VisionService HTTP calls fail inside Windows multiprocessing.Process)
+        if request.attachments:
+            self._preprocess_attachments(request)
+
+        # === STEP 2.6: Web Search (Tavily) ===
+        # Search the web for queries that need current information
+        if self.web_search_service:
+            self._maybe_web_search(request)
+
+        # === STEP 3: Classify (memory-informed) ===
+        classification = self.classifier.classify(request)
+
+        # Enhance classification with memory info
+        if request.memory_context and request.memory_context.has_relevant_memory:
+            classification.memory_informed = True
+            classification.memory_confidence = request.memory_context.avg_confidence
+
+        # === STEP 4: Policy ===
+        decision = self.policy.decide(request, classification)
+
+        # === STEP 5: Route ===
+        result = self.router.route(request, decision)
+
+        # === STEP 6: Build response ===
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        response = self.response_builder.build(
+            result=result,
+            decision=decision,
+            classification=classification,
+            elapsed_ms=elapsed_ms
+        )
+
+        # === STEP 7: Create Neuron (if successful) ===
+        neuron = None
+        if self.memory_enabled and self.neuron_creator:
+            try:
+                neuron = self.neuron_creator.create_neuron(
+                    request=request,
+                    response=response,
+                    decision=decision,
+                    classification=classification,
+                )
+
+                memory_operation = self.neuron_creator.create_memory_operation(
+                    request=request,
+                    neuron=neuron,
+                )
+
+                if neuron:
+                    response["_meta"] = response.get("_meta", {})
+                    response["_meta"]["neuron_stored"] = True
+                    response["_meta"]["neuron_id"] = neuron.id
+                    response["_meta"]["neuron_confidence"] = neuron.confidence
+
+            except Exception:
+                pass
+
+        # === STEP 7.1: Add Emotional Context to Response (v2.1) ===
+        if emotional_context:
+            response["_meta"] = response.get("_meta", {})
+            response["_meta"]["emotional"] = {
+                "user_state": emotional_context.current_state.value,
+                "confidence": round(emotional_context.current_confidence, 2),
+                "tone_recommendation": emotional_context.tone_recommendation.value,
+                "trend": emotional_context.emotional_trend,
+                "notes": emotional_context.adaptation_notes[:2] if emotional_context.adaptation_notes else [],
+            }
+
+        # === STEP 7.2: Log Interaction for Proactive Analysis (v2.2) ===
+        if self.proactive_service:
+            try:
+                self.proactive_service.log_interaction(
+                    message=request.text,
+                    session_id=request.session_id,
+                    emotional_state=emotional_context.current_state.value if emotional_context else None,
+                    response_success=response.get("success", False),
+                )
+            except Exception:
+                pass
+
+        # === STEP 7.3: Learn User Style for Digital Twin (v3.0) ===
+        if self.digital_twin:
+            try:
+                self.digital_twin.learn_from_message(request.text)
+            except Exception:
+                pass
+
+        # === STEP 8: Audit log (with memory operation) ===
+        self.audit.log(
+            request=request,
+            classification=classification,
+            decision=decision,
+            response=response,
+            elapsed_ms=elapsed_ms,
+            memory_operation=memory_operation,
+        )
+
+        # === STEP 9: Webhook triggers (non-blocking) ===
+        if self.webhook_service:
+            try:
+                event_data = {
+                    "request_text": request.text[:500] if request.text else "",
+                    "response_text": response.text[:500] if hasattr(response, 'text') and response.text else "",
+                    "handler": decision.handler.value if decision else None,
+                    "success": response.success if hasattr(response, 'success') else True,
+                    "elapsed_ms": elapsed_ms,
+                    "session_id": self.session_manager.current_session_id if self.session_manager else None,
+                }
+                self.webhook_service.trigger_event("post_response", event_data)
+
+                # Trigger on_error for failed responses
+                if hasattr(response, 'success') and not response.success:
+                    self.webhook_service.trigger_event("on_error", event_data)
+            except Exception:
+                pass  # Webhooks must never break the pipeline
+
+        return response
+
+    def _preprocess_attachments(self, request) -> None:
+        """
+        Pre-analyze image attachments using VisionService.
+
+        Runs in the main process (not sandbox) so HTTP calls to Ollama work
+        reliably. Stores descriptions on Attachment.description for the handler.
+        """
+        vision_service = getattr(self.router, 'vision_service', None)
+        document_parser = getattr(self.router, 'document_parser', None)
+
+        for att in request.attachments:
+            try:
+                is_image = att.is_image() if hasattr(att, 'is_image') else False
+                is_pdf = att.is_pdf() if hasattr(att, 'is_pdf') else False
+
+                if is_image and vision_service:
+                    logger.info(f"[Pipeline] Analyzing image: {att.name} via VisionService")
+                    result = vision_service.analyze_attachment(att)
+                    if result.success and result.description:
+                        att.description = (
+                            f"(Image analyzed by {result.model}, {result.elapsed_ms}ms)\n"
+                            f"Description: {result.description}"
+                        )
+                        logger.info(f"[Pipeline] Image analyzed: {att.name} ({result.elapsed_ms}ms)")
+                        continue
+                    else:
+                        logger.warning(f"[Pipeline] Vision failed for {att.name}: {result.error}")
+
+                # Fallback: try document parser (dots.ocr) for images and PDFs
+                if (is_image or is_pdf) and document_parser:
+                    try:
+                        parse_result = document_parser.parse_attachment(att)
+                        if parse_result and parse_result.success and parse_result.text:
+                            label = "PDF content" if is_pdf else "Image text"
+                            truncated = parse_result.text[:8000]
+                            if len(parse_result.text) > 8000:
+                                truncated += "\n... (truncated)"
+                            att.description = f"({label} extracted via OCR, {parse_result.elapsed_ms}ms)\n```\n{truncated}\n```"
+                            continue
+                    except Exception as e:
+                        logger.warning(f"[Pipeline] OCR failed for {att.name}: {e}")
+
+            except Exception as e:
+                logger.warning(f"[Pipeline] Attachment preprocessing failed for {att.name}: {e}")
+
+    def _maybe_web_search(self, request) -> None:
+        """
+        Perform web search if the query would benefit from it.
+
+        Stores results in request.metadata['_web_search'] for the handler.
+        Only searches if auto_search is enabled or query matches search heuristics.
+        """
+        try:
+            ws = self.web_search_service
+            if not ws.is_available():
+                return
+
+            # Check if query needs web search
+            should_search = ws.auto_search or ws.needs_search(request.text)
+            if not should_search:
+                return
+
+            logger.info(f"[Pipeline] Web search: '{request.text[:80]}'")
+            result = ws.search(request.text)
+
+            if result.success and result.results:
+                # Store formatted context in metadata for the handler
+                request.metadata['_web_search'] = result.to_context()
+                request.metadata['_web_search_query'] = result.query
+                request.metadata['_web_search_elapsed_ms'] = result.elapsed_ms
+                logger.info(
+                    f"[Pipeline] Web search: {len(result.results)} results "
+                    f"({result.elapsed_ms}ms)"
+                )
+            elif result.error:
+                logger.warning(f"[Pipeline] Web search failed: {result.error}")
+
+        except Exception as e:
+            logger.warning(f"[Pipeline] Web search error: {e}")

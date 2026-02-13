@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Image, FileText, File, Download, ExternalLink, X } from 'lucide-react';
+import { useTranslation } from '../i18n';
 
 function MessageBubble({ message }) {
   const { role, content, timestamp, success, meta, attachments } = message;
   const isUser = role === 'user';
   const [lightboxImage, setLightboxImage] = useState(null);
+  const { t } = useTranslation();
 
   const formatTime = (ts) => {
     const date = new Date(ts);
@@ -47,9 +49,10 @@ function MessageBubble({ message }) {
             {att.type?.startsWith('image/') ? (
               <div className="attachment-image-wrapper" onClick={() => openImageInLightbox(att)}>
                 <img
-                  src={att.preview || att.data}
+                  src={att.data || att.preview}
                   alt={att.name}
                   className="attachment-image"
+                  onError={(e) => { e.target.style.display = 'none'; }}
                 />
                 <div className="attachment-image-overlay">
                   <ExternalLink size={20} />
@@ -65,7 +68,7 @@ function MessageBubble({ message }) {
                 <button
                   className="attachment-download-btn"
                   onClick={() => downloadAttachment(att)}
-                  title="Download"
+                  title={t('message.download')}
                 >
                   <Download size={16} />
                 </button>
@@ -91,7 +94,7 @@ function MessageBubble({ message }) {
         </div>
         <div className="message-body">
           <div className="message-header">
-            <span className="message-role">{isUser ? 'You' : 'Antonio'}</span>
+            <span className="message-role">{isUser ? t('message.you') : t('message.antonio')}</span>
             <span className="message-time">{formatTime(timestamp)}</span>
           </div>
 
@@ -136,7 +139,7 @@ function MessageBubble({ message }) {
                     <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" />
                     <path d="M12 6v6l4 4" />
                   </svg>
-                  learned
+                  {t('message.learned')}
                 </span>
               )}
             </div>
@@ -152,14 +155,15 @@ function MessageBubble({ message }) {
               <X size={24} />
             </button>
             <img
-              src={lightboxImage.preview || lightboxImage.data}
+              src={lightboxImage.data || lightboxImage.preview}
               alt={lightboxImage.name}
               className="lightbox-image"
+              onError={(e) => { e.target.style.display = 'none'; }}
             />
             <div className="lightbox-footer">
               <span>{lightboxImage.name}</span>
               <button onClick={() => downloadAttachment(lightboxImage)}>
-                <Download size={16} /> Download
+                <Download size={16} /> {t('message.download')}
               </button>
             </div>
           </div>

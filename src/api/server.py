@@ -129,8 +129,8 @@ def create_orchestrator() -> Tuple[Optional[Any], Optional[str]]:
                         return self._llm_available
 
                 try:
-                    from ..handlers.llm_local import LLMLocalHandler
-                    handler = LLMLocalHandler({})
+                    from ..handlers.mistral import MistralHandler
+                    handler = MistralHandler({})
                     self._llm_available = handler.is_available()
                 except Exception:
                     self._llm_available = False

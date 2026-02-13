@@ -11,8 +11,8 @@
     "mistral": {
       "enabled": true,
       "base_url": "http://localhost:11434",
-      "model": "mistral",
-      "timeout": 120,
+      "model": "qwen3:8b",
+      "timeout": 180,
       "sandbox": {
         "enabled": true,
         "timeout_seconds": 120,
@@ -102,6 +102,13 @@
       "timeout_seconds": 60,
       "use_http": false,
       "http_url": "http://localhost:8805"
+    },
+    "vision": {
+      "enabled": true,
+      "model": "richardyoung/smolvlm2-2.2b-instruct",
+      "base_url": "http://localhost:11434",
+      "timeout": 120,
+      "max_image_size": 10000000
     }
   }
 }

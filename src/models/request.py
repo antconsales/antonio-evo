@@ -26,6 +26,8 @@ class Attachment:
     type: str  # MIME type (e.g., "image/png", "text/plain")
     size: int
     data: str  # Base64 encoded content
+    # Pre-analyzed description (set by pipeline before handler routing)
+    description: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""

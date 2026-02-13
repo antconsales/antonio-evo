@@ -11,6 +11,7 @@ Design principles:
 - Deterministic hashing
 """
 
+import glob as glob_module
 import hashlib
 import json
 import os
@@ -173,17 +174,30 @@ class AuditLogger:
         entries = logger.get_recent(10)
     """
 
-    def __init__(self, log_path: str = "logs/audit.jsonl"):
+    def __init__(
+        self,
+        log_path: str = "logs/audit.jsonl",
+        max_size_mb: int = 50,
+        max_backups: int = 10,
+        retention_days: int = 30,
+    ):
         """
         Initialize audit logger.
 
         Args:
             log_path: Path to the JSONL log file
+            max_size_mb: Maximum log file size before rotation (default 50MB)
+            max_backups: Maximum number of backup files to keep (default 10)
+            retention_days: Delete backups older than this (default 30 days)
         """
         self.log_path = log_path
+        self.max_size_bytes = max_size_mb * 1024 * 1024
+        self.max_backups = max_backups
+        self.retention_days = retention_days
         self._previous_hash = GENESIS_HASH
         self._sequence = 0
         self._ensure_dir()
+        self._enforce_retention()
         self._load_chain_state()
 
     def _ensure_dir(self):
@@ -346,9 +360,69 @@ class AuditLogger:
             self._sequence -= 1
             return None
 
+    def _check_rotation(self):
+        """
+        Check if log file needs rotation based on size.
+
+        When rotated:
+        - audit.jsonl.{N} → audit.jsonl.{N+1} (shift existing backups)
+        - audit.jsonl → audit.jsonl.1
+        - Start new chain with genesis hash
+        - Delete backups exceeding max_backups
+        """
+        try:
+            if not os.path.exists(self.log_path):
+                return
+
+            file_size = os.path.getsize(self.log_path)
+            if file_size < self.max_size_bytes:
+                return
+
+            # Shift existing backups: .9 → .10, .8 → .9, etc.
+            for i in range(self.max_backups, 0, -1):
+                old_path = f"{self.log_path}.{i}"
+                new_path = f"{self.log_path}.{i + 1}"
+                if os.path.exists(old_path):
+                    if i >= self.max_backups:
+                        os.remove(old_path)  # Delete oldest beyond limit
+                    else:
+                        os.rename(old_path, new_path)
+
+            # Rotate current log to .1
+            os.rename(self.log_path, f"{self.log_path}.1")
+
+            # Reset chain state for new file
+            self._previous_hash = GENESIS_HASH
+            self._sequence = 0
+
+        except OSError:
+            # Rotation failed, continue writing to current file
+            pass
+
+    def _enforce_retention(self):
+        """
+        Delete backup files older than retention_days.
+
+        Called at initialization to clean up old logs.
+        """
+        try:
+            cutoff_time = time.time() - (self.retention_days * 86400)
+            pattern = f"{self.log_path}.*"
+            for backup_path in glob_module.glob(pattern):
+                try:
+                    if os.path.getmtime(backup_path) < cutoff_time:
+                        os.remove(backup_path)
+                except OSError:
+                    continue
+        except Exception:
+            # Retention enforcement failed, non-critical
+            pass
+
     def _write(self, entry: AuditEntry) -> bool:
         """
         Write entry to log file.
+
+        Checks for rotation before writing.
 
         Args:
             entry: The audit entry to write
@@ -357,6 +431,9 @@ class AuditLogger:
             True if write succeeded, False otherwise
         """
         try:
+            # Check if rotation needed before writing
+            self._check_rotation()
+
             with open(self.log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
             return True

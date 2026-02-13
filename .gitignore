@@ -43,3 +43,18 @@ htmlcov/
 *.tmp
 *.temp
 .cache/
+
+# Runtime artifacts
+logs/
+output/
+nul
+
+# Claude Code
+.claude/
+
+# Large binaries (Piper TTS)
+tools/piper/*.onnx
+tools/piper/*.onnx.json
+tools/piper/*.zip
+tools/piper/piper
+tools/piper/piper.exe

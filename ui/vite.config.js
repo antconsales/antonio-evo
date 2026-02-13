@@ -11,5 +11,6 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: false,
+    host: '127.0.0.1',
   },
 });

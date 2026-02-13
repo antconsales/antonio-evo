@@ -51,6 +51,7 @@ if FASTAPI_AVAILABLE:
         """Incoming chat message."""
         text: str
         session_id: Optional[str] = None
+        think: Optional[bool] = None
 
     class ListenRequest(BaseModel):
         """Audio transcription request."""
@@ -113,6 +114,9 @@ def create_app() -> "FastAPI":
         description="Local-first AI assistant with evolutionary memory",
         version="2.0-evo",
     )
+
+    # Ensure output directories exist
+    Path("output/images").mkdir(parents=True, exist_ok=True)
 
     # CORS for frontend
     app.add_middleware(
@@ -263,6 +267,7 @@ def create_app() -> "FastAPI":
                 "text": str(output),
                 "persona": persona,
                 "mood": mood,
+                "handler": decision.get("handler", "unknown"),
                 "neuron_stored": meta.get("neuron_stored", False),
                 "neuron_id": meta.get("neuron_id"),
                 "elapsed_ms": result.get("elapsed_ms", 0),
@@ -383,11 +388,19 @@ def create_app() -> "FastAPI":
             orchestrator.start_session()
 
         try:
+            # Build input dict with optional thinking metadata
+            input_data = {
+                "text": message.text,
+                "source": "rest",
+            }
+            if message.think is not None:
+                input_data["metadata"] = {"think": message.think}
+
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
                 orchestrator.process,
-                message.text,
+                input_data,
             )
 
             decision = result.get("decision", {})
@@ -510,6 +523,92 @@ def create_app() -> "FastAPI":
                 success=False,
                 error=str(e)
             )
+
+    class TTSRequest(BaseModel):
+        """TTS synthesis request."""
+        text: str
+        voice: Optional[str] = None
+
+    @app.post("/api/tts")
+    async def tts_synthesize(request: TTSRequest):
+        """
+        Synthesize speech from text using Piper TTS.
+
+        Returns WAV audio as base64 or file path.
+        Uses the local Piper binary in tools/piper/.
+        """
+        import base64
+        import subprocess
+        import os
+        import hashlib
+
+        text = request.text.strip()
+        if not text:
+            return {"success": False, "error": "No text provided"}
+
+        # Strip emoji and non-ASCII chars that Piper/cp1252 can't handle on Windows
+        import re
+        text = re.sub(r'[^\x00-\x7F]+', '', text).strip()
+        if not text:
+            return {"success": False, "error": "No speakable text after removing special characters"}
+
+        # Piper binary and voice paths
+        project_root = str(Path(__file__).parent.parent.parent)
+        piper_exe = os.path.join(project_root, "tools", "piper", "piper", "piper.exe")
+        voice_model = os.path.join(
+            project_root, "tools", "piper",
+            request.voice or os.environ.get("PIPER_VOICE", "it_IT-paola-medium") + ".onnx"
+        )
+
+        # If voice doesn't end with .onnx, add it
+        if not voice_model.endswith(".onnx"):
+            voice_model += ".onnx"
+
+        if not os.path.exists(piper_exe):
+            return {"success": False, "error": f"Piper binary not found at {piper_exe}"}
+
+        if not os.path.exists(voice_model):
+            return {"success": False, "error": f"Voice model not found at {voice_model}"}
+
+        # Output path
+        output_dir = os.path.join(project_root, "output", "tts")
+        os.makedirs(output_dir, exist_ok=True)
+        text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
+        output_path = os.path.join(output_dir, f"{text_hash}.wav")
+
+        try:
+            # Run Piper subprocess (use bytes input to avoid cp1252 encoding issues)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: subprocess.run(
+                [piper_exe, "--model", voice_model, "--output_file", output_path],
+                input=text.encode('utf-8'),
+                capture_output=True,
+                timeout=30,
+            ))
+
+            if result.returncode != 0:
+                return {"success": False, "error": f"Piper error: {result.stderr}"}
+
+            if not os.path.exists(output_path):
+                return {"success": False, "error": "TTS output not created"}
+
+            # Read and return as base64
+            with open(output_path, "rb") as f:
+                audio_data = base64.b64encode(f.read()).decode("ascii")
+
+            return {
+                "success": True,
+                "audio": audio_data,
+                "format": "wav",
+                "text_length": len(text),
+            }
+
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "TTS timeout (30s)"}
+        except FileNotFoundError:
+            return {"success": False, "error": "Piper binary not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @app.get("/api/health")
     async def health():
@@ -1478,95 +1577,188 @@ def create_app() -> "FastAPI":
             }
 
     # ===================
-    # Task System (UI Task Cards)
+    # Webhook Management (n8n integration)
     # ===================
 
-    @app.get("/api/tasks/pending")
-    async def get_pending_tasks(limit: int = 20):
-        """
-        Get tasks pending approval.
-
-        Used by UI to render Task Cards requiring user action.
-        """
+    @app.get("/api/webhooks")
+    async def get_webhooks():
+        """Get all configured webhooks."""
         try:
-            from ..services.task_system import get_task_manager
-            task_manager = get_task_manager()
-            tasks = task_manager.get_pending_tasks(
-                session_id=orchestrator.current_session_id,
-                limit=limit
+            from ..services.webhook_service import get_webhook_service
+            service = get_webhook_service()
+            return {"success": True, "webhooks": service.webhooks}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    class WebhookCreateRequest(BaseModel):
+        """Webhook creation/update request."""
+        name: str
+        url: str
+        trigger: str = "post_response"
+
+    @app.post("/api/webhooks")
+    async def create_webhook(request: WebhookCreateRequest):
+        """Create a new webhook."""
+        try:
+            from ..services.webhook_service import get_webhook_service
+            service = get_webhook_service()
+            webhook = service.add_webhook(
+                name=request.name,
+                url=request.url,
+                trigger=request.trigger,
             )
+            return {"success": True, "webhook": webhook}
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    class WebhookUpdateRequest(BaseModel):
+        """Webhook update request."""
+        name: Optional[str] = None
+        url: Optional[str] = None
+        trigger: Optional[str] = None
+        enabled: Optional[bool] = None
+
+    @app.put("/api/webhooks/{webhook_id}")
+    async def update_webhook(webhook_id: str, request: WebhookUpdateRequest):
+        """Update an existing webhook."""
+        try:
+            from ..services.webhook_service import get_webhook_service
+            service = get_webhook_service()
+            updates = {k: v for k, v in request.model_dump().items() if v is not None}
+            webhook = service.update_webhook(webhook_id, updates)
+            if webhook:
+                return {"success": True, "webhook": webhook}
+            return {"success": False, "error": "Webhook not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.delete("/api/webhooks/{webhook_id}")
+    async def delete_webhook(webhook_id: str):
+        """Delete a webhook."""
+        try:
+            from ..services.webhook_service import get_webhook_service
+            service = get_webhook_service()
+            if service.delete_webhook(webhook_id):
+                return {"success": True}
+            return {"success": False, "error": "Webhook not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/webhooks/{webhook_id}/test")
+    async def test_webhook(webhook_id: str):
+        """Test a webhook connection."""
+        try:
+            from ..services.webhook_service import get_webhook_service
+            service = get_webhook_service()
+            result = service.test_webhook(webhook_id)
+            return result
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ===================
+    # Web Search (Tavily)
+    # ===================
+
+    @app.get("/api/web-search/status")
+    async def web_search_status():
+        """Get web search service status."""
+        try:
+            ws = orchestrator.web_search_service
+            if not ws:
+                return {"available": False, "error": "Web search not initialized"}
+            return {
+                "available": ws.is_available(),
+                "auto_search": ws.auto_search,
+                "has_api_key": bool(ws.api_key),
+            }
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+
+    class WebSearchConfigRequest(BaseModel):
+        """Web search configuration."""
+        api_key: Optional[str] = None
+        auto_search: Optional[bool] = None
+
+    @app.post("/api/web-search/config")
+    async def web_search_config(request: WebSearchConfigRequest):
+        """Update web search configuration."""
+        try:
+            ws = orchestrator.web_search_service
+            if not ws:
+                return {"success": False, "error": "Web search not initialized"}
+
+            if request.api_key is not None:
+                # Save API key to data/api_keys.json
+                keys_path = Path("data/api_keys.json")
+                keys_path.parent.mkdir(parents=True, exist_ok=True)
+                keys = []
+                if keys_path.exists():
+                    with open(keys_path, "r", encoding="utf-8") as f:
+                        keys = json.load(f)
+
+                # Update or add Tavily key
+                found = False
+                for key in keys:
+                    if key.get("name", "").lower() == "tavily":
+                        key["key"] = request.api_key
+                        found = True
+                        break
+                if not found:
+                    keys.append({
+                        "id": f"tavily-{uuid.uuid4().hex[:8]}",
+                        "name": "tavily",
+                        "key": request.api_key,
+                        "created": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    })
+
+                with open(keys_path, "w", encoding="utf-8") as f:
+                    json.dump(keys, f, indent=2, ensure_ascii=False)
+
+                # Update service
+                ws._api_key = request.api_key
+
+            if request.auto_search is not None:
+                ws.auto_search = request.auto_search
+
             return {
                 "success": True,
-                "tasks": [t.to_dict() for t in tasks]
+                "available": ws.is_available(),
+                "auto_search": ws.auto_search,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    @app.get("/api/tasks/history")
-    async def get_task_history(limit: int = 50):
-        """
-        Get task execution history.
+    class WebSearchTestRequest(BaseModel):
+        """Web search test request."""
+        query: str = "What is the current date today?"
 
-        For UI audit trail and transparency.
-        """
+    @app.post("/api/web-search/test")
+    async def web_search_test(request: WebSearchTestRequest):
+        """Test web search with a query."""
         try:
-            from ..services.task_system import get_task_manager
-            task_manager = get_task_manager()
-            tasks = task_manager.get_task_history(
-                session_id=orchestrator.current_session_id,
-                limit=limit
-            )
+            ws = orchestrator.web_search_service
+            if not ws or not ws.is_available():
+                return {"success": False, "error": "Web search not configured"}
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, ws.search, request.query)
+
             return {
-                "success": True,
-                "tasks": [t.to_dict() for t in tasks]
+                "success": result.success,
+                "query": result.query,
+                "answer": result.answer,
+                "results_count": len(result.results),
+                "results": [
+                    {"title": r.get("title", ""), "url": r.get("url", "")}
+                    for r in result.results[:3]
+                ],
+                "elapsed_ms": result.elapsed_ms,
+                "error": result.error,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
-
-    class TaskApprovalRequest(BaseModel):
-        """Task approval request."""
-        task_id: str
-        approved: bool
-        reason: Optional[str] = None
-
-    @app.post("/api/tasks/approve")
-    async def approve_task(request: TaskApprovalRequest):
-        """
-        Approve or reject a pending task.
-
-        Used by UI Task Cards for explicit user consent.
-        """
-        try:
-            from ..services.task_system import get_task_manager
-            task_manager = get_task_manager()
-
-            if request.approved:
-                success, error = task_manager.approve_task(
-                    request.task_id,
-                    approved_by="user"
-                )
-            else:
-                success, error = task_manager.reject_task(
-                    request.task_id,
-                    reason=request.reason or "User rejected"
-                )
-
-            if success:
-                return {"success": True, "task_id": request.task_id}
-            else:
-                return {"success": False, "error": error}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    @app.get("/api/tasks/stats")
-    async def get_task_stats():
-        """Get task system statistics."""
-        try:
-            from ..services.task_system import get_task_manager
-            task_manager = get_task_manager()
-            return task_manager.get_stats()
-        except Exception as e:
-            return {"enabled": False, "error": str(e)}
 
     # ===================
     # Audit Log Access
@@ -1581,18 +1773,19 @@ def create_app() -> "FastAPI":
         """
         try:
             entries = orchestrator.audit.get_recent(limit)
-            # Sanitize for API response
+            # Sanitize for API response (entries are AuditEntry dataclasses)
             sanitized = []
             for entry in entries:
+                payload = entry.payload if hasattr(entry, 'payload') else entry
                 sanitized.append({
-                    "timestamp": entry.get("timestamp_iso"),
-                    "request_text": entry.get("request", {}).get("text", "")[:100],
-                    "handler": entry.get("decision", {}).get("handler"),
-                    "persona": entry.get("decision", {}).get("persona"),
-                    "success": entry.get("response", {}).get("success", False),
-                    "elapsed_ms": entry.get("elapsed_ms", 0),
-                    "memory_stored": bool(entry.get("memory_operation", {}).get("stored_neuron_id")),
-                    "external_call": entry.get("decision", {}).get("handler") == "external",
+                    "timestamp": entry.timestamp_iso if hasattr(entry, 'timestamp_iso') else payload.get("timestamp_iso"),
+                    "request_text": payload.get("request", {}).get("text_preview", "")[:100],
+                    "handler": payload.get("decision", {}).get("handler"),
+                    "persona": payload.get("decision", {}).get("persona"),
+                    "success": payload.get("response", {}).get("success", False),
+                    "elapsed_ms": payload.get("elapsed_ms", 0),
+                    "memory_stored": bool(payload.get("memory_operation", {}).get("stored_neuron_id") if payload.get("memory_operation") else False),
+                    "external_call": payload.get("decision", {}).get("handler") == "external",
                 })
             return {
                 "success": True,
@@ -1612,14 +1805,15 @@ def create_app() -> "FastAPI":
             entries = orchestrator.audit.get_recent(limit * 2)  # Get more to filter
             external = []
             for entry in entries:
-                handler = entry.get("decision", {}).get("handler", "")
+                payload = entry.payload if hasattr(entry, 'payload') else entry
+                handler = payload.get("decision", {}).get("handler", "")
                 if handler == "external" or "external" in handler.lower():
                     external.append({
-                        "timestamp": entry.get("timestamp_iso"),
-                        "provider": entry.get("decision", {}).get("provider", "unknown"),
-                        "request_preview": entry.get("request", {}).get("text", "")[:50],
-                        "success": entry.get("response", {}).get("success", False),
-                        "elapsed_ms": entry.get("elapsed_ms", 0),
+                        "timestamp": entry.timestamp_iso if hasattr(entry, 'timestamp_iso') else payload.get("timestamp_iso"),
+                        "provider": payload.get("decision", {}).get("provider", "unknown"),
+                        "request_preview": payload.get("request", {}).get("text_preview", "")[:50],
+                        "success": payload.get("response", {}).get("success", False),
+                        "elapsed_ms": payload.get("elapsed_ms", 0),
                     })
                 if len(external) >= limit:
                     break
@@ -1766,6 +1960,141 @@ def create_app() -> "FastAPI":
             return {"success": True, "state": state}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # ===================
+    # API Key Management
+    # ===================
+
+    _api_keys_path = Path("data/api_keys.json")
+
+    def _load_api_keys() -> list:
+        """Load API keys from file."""
+        try:
+            if _api_keys_path.exists():
+                with open(_api_keys_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+        return []
+
+    def _save_api_keys(keys: list):
+        """Save API keys to file."""
+        _api_keys_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_api_keys_path, "w", encoding="utf-8") as f:
+            json.dump(keys, f, indent=2, ensure_ascii=False)
+
+    @app.get("/api/keys")
+    async def get_api_keys():
+        """Get all API keys (masked)."""
+        keys = _load_api_keys()
+        # Mask key values for security
+        masked = []
+        for k in keys:
+            masked.append({
+                **k,
+                "key": k["key"][:8] + "..." + k["key"][-4:] if len(k.get("key", "")) > 12 else "***"
+            })
+        return {"success": True, "keys": masked}
+
+    class CreateApiKeyRequest(BaseModel):
+        """Create API key request."""
+        id: str
+        name: str
+        key: str
+        created: str
+        lastUsed: Optional[str] = None
+
+    @app.post("/api/keys")
+    async def create_api_key(request: CreateApiKeyRequest):
+        """Create a new API key."""
+        keys = _load_api_keys()
+        keys.append({
+            "id": request.id,
+            "name": request.name,
+            "key": request.key,
+            "created": request.created,
+            "lastUsed": request.lastUsed,
+        })
+        _save_api_keys(keys)
+        return {"success": True, "id": request.id}
+
+    @app.delete("/api/keys/{key_id}")
+    async def delete_api_key(key_id: str):
+        """Delete an API key."""
+        keys = _load_api_keys()
+        keys = [k for k in keys if k.get("id") != key_id]
+        _save_api_keys(keys)
+        return {"success": True}
+
+    # ===================
+    # External APIs Management
+    # ===================
+
+    _external_apis_path = Path("data/external_apis.json")
+
+    def _load_external_apis() -> dict:
+        """Load external API configurations from file."""
+        try:
+            if _external_apis_path.exists():
+                with open(_external_apis_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+        return {
+            "openai": {"enabled": False, "apiKey": "", "model": "gpt-4"},
+            "anthropic": {"enabled": False, "apiKey": "", "model": "claude-3-opus-20240229"},
+            "google": {"enabled": False, "apiKey": "", "model": "gemini-pro"},
+            "custom": [],
+        }
+
+    def _save_external_apis(apis: dict):
+        """Save external API configurations to file."""
+        _external_apis_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_external_apis_path, "w", encoding="utf-8") as f:
+            json.dump(apis, f, indent=2, ensure_ascii=False)
+
+    @app.get("/api/external-apis")
+    async def get_external_apis():
+        """Get external API configurations."""
+        apis = _load_external_apis()
+        # Mask API keys for security
+        safe = {}
+        for provider, config in apis.items():
+            if provider == "custom":
+                safe["custom"] = [
+                    {**c, "apiKey": "***" if c.get("apiKey") else ""}
+                    for c in config
+                ]
+            elif isinstance(config, dict):
+                safe[provider] = {
+                    **config,
+                    "apiKey": "***" if config.get("apiKey") else "",
+                }
+            else:
+                safe[provider] = config
+        return {"success": True, "apis": safe}
+
+    class ExternalApiUpdateRequest(BaseModel):
+        """External API update request."""
+        provider: str
+        enabled: Optional[bool] = None
+        apiKey: Optional[str] = None
+        model: Optional[str] = None
+
+    @app.post("/api/external-apis")
+    async def update_external_api(request: ExternalApiUpdateRequest):
+        """Update an external API configuration."""
+        apis = _load_external_apis()
+        if request.provider in apis and isinstance(apis[request.provider], dict):
+            if request.enabled is not None:
+                apis[request.provider]["enabled"] = request.enabled
+            if request.apiKey is not None and request.apiKey != "***":
+                apis[request.provider]["apiKey"] = request.apiKey
+            if request.model is not None:
+                apis[request.provider]["model"] = request.model
+            _save_external_apis(apis)
+            return {"success": True}
+        return {"success": False, "error": f"Unknown provider: {request.provider}"}
 
     @app.get("/api/session")
     async def get_session():

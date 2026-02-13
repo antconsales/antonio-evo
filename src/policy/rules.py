@@ -23,9 +23,31 @@ class Rules:
     """
 
     # Patterns that should NEVER be processed
+    # These are checked BEFORE any LLM interaction for security
     BLOCKED_PATTERNS = [
-        # Add security-sensitive patterns here
-        # Example: r"rm\s+-rf\s+/",
+        # SQL injection
+        r"(?i)(union\s+select|drop\s+table|insert\s+into\s+\w+\s+values|delete\s+from\s+\w+\s+where)",
+        r"(?i)(;\s*drop\s|;\s*alter\s|;\s*truncate\s|;\s*update\s+\w+\s+set)",
+        # Template injection
+        r"\$\{[^}]{2,}\}",          # ${...} template expressions
+        r"\{\{[^}]{2,}\}\}",        # {{...}} template expressions
+        # Python code execution
+        r"(?i)__import__\s*\(",
+        r"(?i)\bexec\s*\([^)]*\)",
+        r"(?i)\beval\s*\([^)]*\)",
+        r"(?i)\bcompile\s*\([^)]*\)",
+        # Path traversal
+        r"\.\.[/\\]",               # ../ or ..\
+        # Command injection (shell)
+        r";\s*(rm|del|format|shutdown|kill|reboot)\b",
+        r"\|\s*(bash|sh|cmd|powershell|wget|curl)\b",
+        # OS-level execution patterns
+        r"(?i)os\.system\s*\(",
+        r"(?i)subprocess\.(call|run|Popen)\s*\(",
+        r"(?i)shutil\.rmtree\s*\(",
+        # Script injection
+        r"<script[^>]*>",           # HTML script tags
+        r"javascript\s*:",          # javascript: protocol
     ]
 
     # Keywords for quick intent detection

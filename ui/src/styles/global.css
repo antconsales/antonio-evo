@@ -40,6 +40,25 @@
   --titlebar-height: 40px;
 }
 
+/* Light mode theme */
+:root.light-mode {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f7fa;
+  --bg-tertiary: #e8edf2;
+  --bg-hover: #dde3ea;
+  --bg-active: #d0d8e0;
+
+  --text-primary: #1a1a2e;
+  --text-secondary: #4a4a6a;
+  --text-muted: #8888a0;
+
+  --border-color: #d0d8e0;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.12);
+}
+
 /* Reset */
 *,
 *::before,
@@ -2769,4 +2788,82 @@ body {
 .add-api-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Webhook-specific styles */
+.webhook-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.webhook-status-dot.active {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+
+.webhook-status-dot.inactive {
+  background: var(--text-muted);
+}
+
+.webhook-trigger-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.key-action-btn.success {
+  color: var(--success);
+}
+
+.custom-api-form select {
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.custom-api-form select:focus {
+  border-color: var(--accent-primary);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+/* ============================================
+   Language Selector
+   ============================================ */
+
+.language-select {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.language-select:hover {
+  border-color: var(--accent-primary);
+}
+
+.language-select:focus {
+  border-color: var(--accent-primary);
 }

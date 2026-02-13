@@ -54,15 +54,16 @@ class TTSHandler(BaseHandler):
         try:
             # Run Piper
             # Piper reads from stdin
+            # Strip emoji/non-ASCII that Piper can't pronounce
+            clean_text = text.encode('ascii', 'ignore').decode('ascii')
             result = subprocess.run(
                 [
                     self.piper_path,
                     "--model", self.voice,
                     "--output_file", output_path
                 ],
-                input=text,
+                input=clean_text.encode('utf-8'),
                 capture_output=True,
-                text=True,
                 timeout=self.timeout
             )
 

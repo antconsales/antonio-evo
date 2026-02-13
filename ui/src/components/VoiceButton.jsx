@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useTranslation } from '../i18n';
 
 const API_BASE_URL = 'http://localhost:8420';
 
@@ -9,6 +10,7 @@ function VoiceButton({ onResult, disabled }) {
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const { t } = useTranslation();
 
   const handleResult = useCallback((text) => {
     if (onResult && text) onResult(text);
@@ -78,7 +80,7 @@ function VoiceButton({ onResult, disabled }) {
           handleResult(text);
         } catch (error) {
           console.error('[Voice] Transcription error:', error);
-          alert('Voice transcription failed. Server-side Whisper may not be available.');
+          alert(t('voice.transcriptionFailed'));
         } finally {
           setIsProcessing(false);
         }
@@ -89,7 +91,7 @@ function VoiceButton({ onResult, disabled }) {
       console.log('[Voice] MediaRecorder started (server-side mode)');
     } catch (error) {
       console.error('[Voice] Failed to start MediaRecorder:', error);
-      alert('Could not access microphone. Please check permissions.');
+      alert(t('voice.microphoneError'));
     }
   };
 
@@ -133,7 +135,7 @@ function VoiceButton({ onResult, disabled }) {
         // Auto-start with MediaRecorder
         startMediaRecording();
       } else if (event.error === 'not-allowed') {
-        alert('Microphone access denied. Please allow microphone access.');
+        alert(t('voice.microphoneDenied'));
         setIsProcessing(false);
       } else {
         setIsProcessing(false);
@@ -205,7 +207,7 @@ function VoiceButton({ onResult, disabled }) {
       className={`voice-btn ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
       onClick={handleClick}
       disabled={disabled || isProcessing}
-      title={isRecording ? 'Stop recording' : 'Start voice input'}
+      title={isRecording ? t('voice.stopRecording') : t('voice.startVoiceInput')}
     >
       {isProcessing ? (
         <svg className="spinner" width="20" height="20" viewBox="0 0 24 24">

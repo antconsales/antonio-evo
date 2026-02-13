@@ -19,7 +19,6 @@ Usage:
 import json
 import time
 import sys
-import uuid
 import logging
 from typing import Dict, Any, Union, Optional
 
@@ -50,6 +49,11 @@ from .services.llm_manager import LLMManager, get_llm_manager
 # Runtime Profiles
 from .runtime import RuntimeProfileManager, RuntimeProfile, get_profile_manager
 
+# Extracted components
+from .session.session_manager import SessionManager
+from .pipeline.executor import PipelineExecutor
+from .health.monitor import HealthMonitor
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,15 +61,12 @@ class Orchestrator:
     """
     Main orchestrator for Antonio Evo.
 
-    Flow (deterministic, no exceptions):
-    1. Normalize input -> Request
-    2. Retrieve memory context -> MemoryContext
-    3. Classify intent (memory-informed) -> Classification
-    4. Apply policy -> PolicyDecision
-    5. Route to handler -> Response
-    6. Create neuron (if successful) -> Neuron
-    7. Build response with metadata
-    8. Log to audit trail (with memory operation)
+    Coordinates sub-components:
+    - SessionManager: session lifecycle
+    - PipelineExecutor: 8-step deterministic processing pipeline
+    - HealthMonitor: system health reporting
+
+    Maintains backward compatibility with the same public API.
     """
 
     def __init__(self, config_dir: str = "config"):
@@ -91,15 +92,31 @@ class Orchestrator:
         memory_config = self._load_config(f"{config_dir}/memory.json")
 
         # Core components
-        self.normalizer = Normalizer()
-        self.classifier = Classifier()
-        self.policy = PolicyEngine(f"{config_dir}/policy.json")
+        normalizer = Normalizer()
+        classifier = Classifier(
+            ollama_url=self.service_config.llm_server,
+            model=self.service_config.ollama_model
+        )
+        policy = PolicyEngine(f"{config_dir}/policy.json")
         self.router = Router(f"{config_dir}/handlers.json", self.service_config)
-        self.response_builder = ResponseBuilder()
-        self.audit = AuditLogger()
+        response_builder = ResponseBuilder()
+        audit = AuditLogger()
+
+        # Store refs needed by CLI commands and websocket_server
+        self.audit = audit
+        self.classifier = classifier
 
         # EvoMemory components
         self.memory_enabled = memory_config.get("enabled", True)
+        self.memory_storage = None
+        self.memory_retriever = None
+        self.neuron_creator = None
+        self.emotional_memory = None
+        self.pattern_analyzer = None
+        self.proactive_service = None
+        self.personality_engine = None
+        self.digital_twin = None
+
         if self.memory_enabled:
             db_path = memory_config.get("database_path", "data/evomemory.db")
             self.memory_storage = MemoryStorage(db_path)
@@ -124,14 +141,12 @@ class Orchestrator:
                 self.pattern_analyzer = PatternAnalyzer(db_path)
                 self.proactive_service = ProactiveService(
                     analyzer=self.pattern_analyzer,
-                    analysis_interval=3600,  # Analyze patterns every hour
+                    analysis_interval=3600,
                     enabled=True,
                 )
                 self.proactive_service.start()
                 logger.info("Proactive Mode (v2.2) initialized")
             else:
-                self.pattern_analyzer = None
-                self.proactive_service = None
                 logger.info("Proactive Mode (v2.2) disabled by profile")
 
             # v2.3 Personality Evolution
@@ -143,17 +158,7 @@ class Orchestrator:
                 self.digital_twin = DigitalTwin(db_path)
                 logger.info("Digital Twin (v3.0) initialized")
             else:
-                self.digital_twin = None
                 logger.info("Digital Twin (v3.0) disabled by profile")
-        else:
-            self.memory_storage = None
-            self.memory_retriever = None
-            self.neuron_creator = None
-            self.emotional_memory = None
-            self.pattern_analyzer = None
-            self.proactive_service = None
-            self.personality_engine = None
-            self.digital_twin = None
 
         # RAG components (optional)
         self.rag = None
@@ -168,8 +173,51 @@ class Orchestrator:
         # Multi-LLM Manager
         self.llm_manager = self._init_llm_manager()
 
-        # Session management
-        self.current_session_id: Optional[str] = None
+        # --- Extracted components ---
+
+        # Session Manager
+        self.session_manager = SessionManager(self.memory_storage)
+
+        # Pipeline Executor (all dependencies injected)
+        # Webhook Service (n8n integration)
+        self.webhook_service = self._init_webhook_service()
+
+        # Web Search Service (Tavily)
+        self.web_search_service = self._init_web_search()
+
+        self.pipeline = PipelineExecutor(
+            normalizer=normalizer,
+            classifier=classifier,
+            policy=policy,
+            router=self.router,
+            response_builder=response_builder,
+            audit=audit,
+            session_manager=self.session_manager,
+            memory_enabled=self.memory_enabled,
+            memory_retriever=self.memory_retriever,
+            neuron_creator=self.neuron_creator,
+            emotional_memory=self.emotional_memory,
+            proactive_service=self.proactive_service,
+            digital_twin=self.digital_twin,
+            webhook_service=self.webhook_service,
+            web_search_service=self.web_search_service,
+        )
+
+        # Health Monitor (all dependencies injected)
+        self.health_monitor = HealthMonitor(
+            router=self.router,
+            profile_manager=self.profile_manager,
+            session_manager=self.session_manager,
+            memory_enabled=self.memory_enabled,
+            memory_storage=self.memory_storage,
+            warmup=self.warmup,
+            rag=self.rag,
+            emotional_memory=self.emotional_memory,
+            pattern_analyzer=self.pattern_analyzer,
+            personality_engine=self.personality_engine,
+            digital_twin=self.digital_twin,
+            llm_manager=self.llm_manager,
+        )
 
     def _init_warmup(self) -> None:
         """Initialize Ollama warm-up service."""
@@ -181,11 +229,9 @@ class Orchestrator:
                 keepalive_minutes=self.service_config.ollama_keepalive_minutes
             )
 
-            # Perform warm-up (blocking)
             logger.info("Starting Ollama warm-up...")
             if self.warmup.warmup(timeout=120):
                 logger.info("Ollama warm-up complete")
-                # Start keep-alive thread
                 self.warmup.start_keepalive()
             else:
                 logger.warning("Ollama warm-up failed, continuing without it")
@@ -228,10 +274,8 @@ class Orchestrator:
             db_path = "data/evomemory.db"
             llm_manager = get_llm_manager(db_path, self.profile_capabilities)
 
-            # Configure from environment
             llm_manager.configure_from_env(self.service_config)
 
-            # Check availability
             availability = llm_manager.check_availability()
             available_count = sum(
                 1 for status in availability.values()
@@ -245,6 +289,31 @@ class Orchestrator:
             logger.warning(f"Failed to initialize LLM Manager: {e}")
             return None
 
+    def _init_webhook_service(self):
+        """Initialize n8n Webhook Service."""
+        try:
+            from .services.webhook_service import get_webhook_service
+            service = get_webhook_service()
+            logger.info(f"Webhook Service initialized ({len(service.webhooks)} webhooks configured)")
+            return service
+        except Exception as e:
+            logger.warning(f"Failed to initialize Webhook Service: {e}")
+            return None
+
+    def _init_web_search(self):
+        """Initialize Tavily Web Search Service."""
+        try:
+            from .services.web_search import get_web_search_service
+            service = get_web_search_service()
+            if service.is_available():
+                logger.info("Web Search Service (Tavily) initialized")
+            else:
+                logger.info("Web Search Service configured but no API key set")
+            return service
+        except Exception as e:
+            logger.warning(f"Failed to initialize Web Search Service: {e}")
+            return None
+
     def _load_config(self, path: str) -> Dict[str, Any]:
         """Load JSON config file, return empty dict if not found."""
         try:
@@ -253,268 +322,42 @@ class Orchestrator:
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
+    # === Public API (backward compatible) ===
+
+    @property
+    def current_session_id(self) -> Optional[str]:
+        """Get current session ID."""
+        return self.session_manager.current_session_id
+
+    @current_session_id.setter
+    def current_session_id(self, value: Optional[str]):
+        """Set current session ID (used by websocket_server)."""
+        self.session_manager.current_session_id = value
+
     def start_session(self) -> str:
         """Start a new conversation session."""
-        self.current_session_id = str(uuid.uuid4())[:12]
-        if self.memory_storage:
-            self.memory_storage.create_session(self.current_session_id)
-        return self.current_session_id
+        return self.session_manager.start_session()
 
     def end_session(self):
         """End the current session."""
-        if self.current_session_id and self.memory_storage:
-            self.memory_storage.end_session(self.current_session_id)
-        self.current_session_id = None
+        self.session_manager.end_session()
 
     def process(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
         Process a single request.
 
         SYNCHRONOUS. One request in, one response out.
-        No async, no callbacks, no side effects beyond audit log and memory.
+        Delegates to PipelineExecutor.
         """
-
-        start_time = time.time()
-        memory_operation = None
-
-        # === STEP 1: Normalize ===
-        norm_result = self.normalizer.normalize(raw_input)
-
-        if not norm_result.success:
-            # Normalization failed - return error response
-            return {
-                "success": False,
-                "error": "; ".join([e.message for e in norm_result.errors]),
-                "error_code": norm_result.error_code,
-                "elapsed_ms": int((time.time() - start_time) * 1000),
-            }
-
-        request = norm_result.request
-
-        # Attach session ID
-        request.session_id = self.current_session_id
-
-        # === STEP 2: Memory Retrieval ===
-        if self.memory_enabled and self.memory_retriever:
-            try:
-                memory_context = self.memory_retriever.retrieve(
-                    query=request.text,
-                    session_id=request.session_id,
-                )
-                request.memory_context = memory_context
-            except Exception:
-                # Memory retrieval failed, continue without it
-                request.memory_context = None
-
-        # === STEP 2.1: Emotional Context (v2.1) ===
-        emotional_context = None
-        if self.memory_enabled and self.emotional_memory:
-            try:
-                emotional_context = self.emotional_memory.get_emotional_context(
-                    message=request.text,
-                    session_id=request.session_id,
-                )
-                request.emotional_context = emotional_context
-            except Exception:
-                # Emotional analysis failed, continue without it
-                request.emotional_context = None
-
-        # === STEP 3: Classify (memory-informed) ===
-        classification = self.classifier.classify(request)
-
-        # Enhance classification with memory info
-        if request.memory_context and request.memory_context.has_relevant_memory:
-            classification.memory_informed = True
-            classification.memory_confidence = request.memory_context.avg_confidence
-
-        # === STEP 4: Policy ===
-        decision = self.policy.decide(request, classification)
-
-        # === STEP 5: Route ===
-        result = self.router.route(request, decision)
-
-        # === STEP 6: Build response ===
-        elapsed_ms = int((time.time() - start_time) * 1000)
-        response = self.response_builder.build(
-            result=result,
-            decision=decision,
-            classification=classification,
-            elapsed_ms=elapsed_ms
-        )
-
-        # === STEP 7: Create Neuron (if successful) ===
-        neuron = None
-        if self.memory_enabled and self.neuron_creator:
-            try:
-                neuron = self.neuron_creator.create_neuron(
-                    request=request,
-                    response=response,
-                    decision=decision,
-                    classification=classification,
-                )
-
-                # Create memory operation for audit
-                memory_operation = self.neuron_creator.create_memory_operation(
-                    request=request,
-                    neuron=neuron,
-                )
-
-                # Add neuron info to response metadata
-                if neuron:
-                    response["_meta"] = response.get("_meta", {})
-                    response["_meta"]["neuron_stored"] = True
-                    response["_meta"]["neuron_id"] = neuron.id
-                    response["_meta"]["neuron_confidence"] = neuron.confidence
-
-            except Exception:
-                # Neuron creation failed, continue without it
-                pass
-
-        # === STEP 7.1: Add Emotional Context to Response (v2.1) ===
-        if emotional_context:
-            response["_meta"] = response.get("_meta", {})
-            response["_meta"]["emotional"] = {
-                "user_state": emotional_context.current_state.value,
-                "confidence": round(emotional_context.current_confidence, 2),
-                "tone_recommendation": emotional_context.tone_recommendation.value,
-                "trend": emotional_context.emotional_trend,
-                "notes": emotional_context.adaptation_notes[:2] if emotional_context.adaptation_notes else [],
-            }
-
-        # === STEP 7.2: Log Interaction for Proactive Analysis (v2.2) ===
-        if self.proactive_service:
-            try:
-                self.proactive_service.log_interaction(
-                    message=request.text,
-                    session_id=request.session_id,
-                    emotional_state=emotional_context.current_state.value if emotional_context else None,
-                    response_success=response.get("success", False),
-                )
-            except Exception:
-                # Non-critical, continue
-                pass
-
-        # === STEP 7.3: Learn User Style for Digital Twin (v3.0) ===
-        if self.digital_twin:
-            try:
-                self.digital_twin.learn_from_message(request.text)
-            except Exception:
-                # Non-critical, continue
-                pass
-
-        # === STEP 8: Audit log (with memory operation) ===
-        self.audit.log(
-            request=request,
-            classification=classification,
-            decision=decision,
-            response=response,
-            elapsed_ms=elapsed_ms,
-            memory_operation=memory_operation,
-        )
-
-        return response
+        return self.pipeline.execute(raw_input)
 
     def health_check(self) -> Dict[str, Any]:
         """
         Check system health.
 
-        Returns status of all components including memory stats.
+        Delegates to HealthMonitor.
         """
-        result = {
-            "status": "ok",
-            "version": "2.0-evo",
-            "handlers": self.router.get_available_handlers(),
-            "timestamp": time.time(),
-            "session_id": self.current_session_id,
-        }
-
-        # Add runtime profile info
-        result["profile"] = self.profile_manager.get_stats()
-
-        # Add memory stats if enabled
-        if self.memory_enabled and self.memory_storage:
-            try:
-                memory_stats = self.memory_storage.get_stats()
-                result["memory"] = {
-                    "enabled": True,
-                    "total_neurons": memory_stats.get("total_neurons", 0),
-                    "avg_confidence": round(memory_stats.get("avg_confidence", 0), 3),
-                    "total_accesses": memory_stats.get("total_accesses", 0),
-                }
-            except Exception:
-                result["memory"] = {"enabled": True, "error": "Failed to get stats"}
-        else:
-            result["memory"] = {"enabled": False}
-
-        # Add warmup status
-        if self.warmup:
-            result["warmup"] = self.warmup.get_status()
-        else:
-            result["warmup"] = {"enabled": False}
-
-        # Add RAG status
-        if self.rag:
-            result["rag"] = self.rag.get_stats()
-        else:
-            result["rag"] = {"enabled": False}
-
-        # Add Emotional Memory status (v2.1)
-        if self.emotional_memory:
-            try:
-                emotional_stats = self.emotional_memory.get_stats()
-                result["emotional_memory"] = {
-                    "enabled": True,
-                    "version": "2.1",
-                    "total_signals": emotional_stats.get("total_signals", 0),
-                    "weekly_distribution": emotional_stats.get("weekly_distribution", {}),
-                    "avg_confidence": emotional_stats.get("avg_confidence", 0),
-                }
-            except Exception:
-                result["emotional_memory"] = {"enabled": True, "error": "Failed to get stats"}
-        else:
-            result["emotional_memory"] = {"enabled": False}
-
-        # Add Proactive Mode status (v2.2)
-        if self.pattern_analyzer:
-            try:
-                proactive_stats = self.pattern_analyzer.get_stats()
-                result["proactive"] = proactive_stats
-            except Exception:
-                result["proactive"] = {"enabled": True, "error": "Failed to get stats"}
-        else:
-            result["proactive"] = {"enabled": False}
-
-        # Add Personality Evolution status (v2.3)
-        if self.personality_engine:
-            try:
-                personality_stats = self.personality_engine.get_stats()
-                result["personality"] = personality_stats
-            except Exception:
-                result["personality"] = {"enabled": True, "error": "Failed to get stats"}
-        else:
-            result["personality"] = {"enabled": False}
-
-        # Add Digital Twin status (v3.0)
-        if self.digital_twin:
-            try:
-                twin_stats = self.digital_twin.get_stats()
-                result["digital_twin"] = twin_stats
-            except Exception:
-                result["digital_twin"] = {"enabled": True, "error": "Failed to get stats"}
-        else:
-            result["digital_twin"] = {"enabled": False}
-
-        # Add LLM Manager status
-        if self.llm_manager:
-            try:
-                llm_stats = self.llm_manager.get_stats()
-                result["llm_manager"] = llm_stats
-            except Exception:
-                result["llm_manager"] = {"enabled": True, "error": "Failed to get stats"}
-        else:
-            result["llm_manager"] = {"enabled": False}
-
-        return result
+        return self.health_monitor.check()
 
     def memory_search(self, query: str, limit: int = 5) -> list:
         """Search memory for similar past interactions."""
@@ -639,7 +482,6 @@ def main():
                             print(f"      Avg latency: {model['avg_latency_ms']}ms")
                         print()
 
-                    # Show 24h stats
                     stats = orchestrator.llm_manager.get_stats()
                     provider_stats = stats.get("provider_stats_24h", {})
                     if provider_stats:
@@ -656,12 +498,15 @@ def main():
             if user_input == "/recent":
                 recent = orchestrator.audit.get_recent(5)
                 for entry in recent:
-                    handler = entry.get("decision", {}).get("handler", "?")
-                    persona = entry.get("decision", {}).get("persona", "?")
-                    elapsed = entry.get("elapsed_ms", 0)
-                    neuron = entry.get("memory_operation", {}).get("stored_neuron_id", "")
+                    payload = entry.payload if hasattr(entry, 'payload') else entry
+                    handler = payload.get("decision", {}).get("handler", "?")
+                    persona = payload.get("decision", {}).get("persona", "?")
+                    elapsed = payload.get("elapsed_ms", 0)
+                    mem_op = payload.get("memory_operation") or {}
+                    neuron = mem_op.get("stored_neuron_id", "")
                     neuron_str = f" [+{neuron[:6]}]" if neuron else ""
-                    print(f"[{entry.get('timestamp_iso', '?')}] "
+                    ts = entry.timestamp_iso if hasattr(entry, 'timestamp_iso') else "?"
+                    print(f"[{ts}] "
                           f"{handler}/{persona} ({elapsed}ms){neuron_str}")
                 continue
 
@@ -694,7 +539,6 @@ def main():
 
             if user_input == "/insights":
                 if orchestrator.pattern_analyzer:
-                    # Get pending insights
                     insights = orchestrator.pattern_analyzer.get_pending_insights(limit=5)
                     if insights:
                         print("Proactive Insights (v2.2):")
@@ -703,7 +547,6 @@ def main():
                             print(f"  [{priority_icon}] {insight.message}")
                             orchestrator.pattern_analyzer.mark_insight_shown(insight.id)
                     else:
-                        # No pending insights, show stats
                         stats = orchestrator.pattern_analyzer.get_stats()
                         print(f"Proactive Mode v{stats.get('version', '2.2')}")
                         print(f"Interactions logged: {stats.get('total_interactions', 0)}")

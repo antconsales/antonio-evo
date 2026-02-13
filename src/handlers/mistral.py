@@ -47,14 +47,24 @@ class MistralHandler(BaseHandler):
         self.max_tokens = config.get("max_tokens", 1024)
         self.persona_name = config.get("persona_name", "default")
 
+        # Qwen3 thinking mode: disabled on CPU for performance (~6x faster)
+        # Enable only if explicitly configured (e.g. with GPU)
+        self.enable_thinking = config.get("enable_thinking", False)
+
         self._system_prompt = self._load_system_prompt()
 
         # Document parser (injected by Router, optional)
         self._document_parser = None
+        # Vision service (injected by Router, optional)
+        self._vision_service = None
 
     def set_document_parser(self, parser):
         """Inject document parser service for image/PDF OCR."""
         self._document_parser = parser
+
+    def set_vision_service(self, service):
+        """Inject vision service for image understanding (SmolVLM2)."""
+        self._vision_service = service
 
     def _load_system_prompt(self) -> str:
         """Load system prompt from configured file."""
@@ -88,29 +98,41 @@ class MistralHandler(BaseHandler):
                 code="MISSING_TEXT"
             )
 
-        # Build prompt based on task type with attachments (v2.4)
-        prompt = self._build_prompt(task_type, user_message, attachments)
+        # Build prompt based on task type with attachments (v2.4) and web search
+        metadata = getattr(request, 'metadata', {}) or {}
+        prompt = self._build_prompt(task_type, user_message, attachments, metadata)
 
         # DEBUG: Log prompt length
         if attachments:
             print(f"[MISTRAL DEBUG] Prompt length: {len(prompt)} chars")
 
         try:
+            # Determine thinking mode per request
+            use_thinking = self.enable_thinking
+            # Check if request metadata overrides thinking
+            if request.metadata and 'think' in request.metadata:
+                use_thinking = request.metadata['think']
+
             # Use /api/chat for better conversation handling
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": self._system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": self.temperature,
+                    "num_predict": self.max_tokens
+                }
+            }
+            # Qwen3: disable thinking for faster chat responses (~6x speedup)
+            if not use_thinking:
+                payload["think"] = False
+
             response = requests.post(
                 f"{self.base_url}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": self._system_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "stream": False,
-                    "options": {
-                        "temperature": self.temperature,
-                        "num_predict": self.max_tokens
-                    }
-                },
+                json=payload,
                 timeout=self.timeout
             )
             response.raise_for_status()
@@ -144,44 +166,51 @@ class MistralHandler(BaseHandler):
                 code="OLLAMA_ERROR"
             )
 
-    def _build_prompt(self, task_type: str, user_message: str, attachments: List = None) -> str:
-        """Build task-specific prompt with optional attachments (v2.4)."""
+    def _build_prompt(self, task_type: str, user_message: str, attachments: List = None, metadata: Dict = None) -> str:
+        """Build task-specific prompt with optional attachments (v2.4) and web search."""
 
         # Add attachment context if present
         attachment_context = ""
         if attachments:
             attachment_context = self._extract_attachment_context(attachments)
 
+        # Add web search context if available (from pipeline preprocessing)
+        web_context = ""
+        if metadata and '_web_search' in metadata:
+            web_context = metadata['_web_search']
+
+        extra_context = attachment_context + web_context
+
         if task_type == "classify":
             return f"""TASK: CLASSIFY
 
-INPUT: {user_message}{attachment_context}
+INPUT: {user_message}{extra_context}
 
 Respond with JSON containing: intent, domain, complexity, requires_external, confidence, reasoning."""
 
         elif task_type == "plan":
             return f"""TASK: PLAN
 
-INPUT: {user_message}{attachment_context}
+INPUT: {user_message}{extra_context}
 
 Decompose this into steps. Respond with JSON containing: steps (array), requires_external, reasoning."""
 
         elif task_type == "generate":
             return f"""TASK: GENERATE TEXT
 
-INPUT: {user_message}{attachment_context}
+INPUT: {user_message}{extra_context}
 
 Generate the requested content. Respond with JSON containing: content, tone, word_count."""
 
         elif task_type == "reason":
             return f"""TASK: REASON
 
-INPUT: {user_message}{attachment_context}
+INPUT: {user_message}{extra_context}
 
 Analyze and respond with JSON containing: analysis, conclusion, confidence, caveats."""
 
         else:  # chat (default) - natural conversation
-            return f"{user_message}{attachment_context}"
+            return f"{user_message}{extra_context}"
 
     def _extract_attachment_context(self, attachments: List) -> str:
         """
@@ -213,6 +242,9 @@ Analyze and respond with JSON containing: analysis, conclusion, confidence, cave
 
                 is_pdf = getattr(att, 'is_pdf', lambda: False)()
 
+                # Check for pre-analyzed description (set by pipeline preprocessing)
+                pre_description = getattr(att, 'description', None)
+
                 if is_text or is_code:
                     try:
                         if data:
@@ -228,13 +260,31 @@ Analyze and respond with JSON containing: analysis, conclusion, confidence, cave
                     except Exception:
                         context_parts.append(f"\n[{name}] (could not decode)")
                 elif is_image or is_pdf:
-                    # Try document parsing via dots.ocr
+                    # Use pre-analyzed description if available (from pipeline)
+                    if pre_description:
+                        context_parts.append(f"\n[{name}] {pre_description}")
+                        continue
+
+                    # Fallback: try VisionService in-process (may fail in sandbox)
+                    if is_image and self._vision_service:
+                        try:
+                            vision_result = self._vision_service.analyze_attachment(att)
+                            if vision_result.success and vision_result.description:
+                                context_parts.append(
+                                    f"\n[{name}] (Image analyzed by {vision_result.model}, {vision_result.elapsed_ms}ms)\n"
+                                    f"Description: {vision_result.description}"
+                                )
+                                continue
+                        except Exception as e:
+                            print(f"[MISTRAL] Vision service error: {e}")
+
+                    # Fallback: try document parsing via dots.ocr
                     parse_result = None
                     if self._document_parser:
                         try:
                             parse_result = self._document_parser.parse_attachment(att)
                         except Exception as e:
-                            print(f"[MISTRAL DEBUG] Document parser error: {e}")
+                            print(f"[MISTRAL] Document parser error: {e}")
 
                     if parse_result and parse_result.success and parse_result.text:
                         label = "PDF content" if is_pdf else "Image text"
@@ -245,7 +295,7 @@ Analyze and respond with JSON containing: analysis, conclusion, confidence, cave
                             f"\n[{name}] ({label} extracted via OCR, {parse_result.elapsed_ms}ms)\n```\n{truncated}\n```"
                         )
                     elif is_image:
-                        context_parts.append(f"\n[{name}] (Image: {mime_type}, {size/1024:.1f}KB)")
+                        context_parts.append(f"\n[{name}] (Image: {mime_type}, {size/1024:.1f}KB - no vision model available)")
                     else:
                         context_parts.append(f"\n[{name}] (PDF: {size/1024:.1f}KB, OCR not available)")
                 else:

@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { windowControls } from '../api';
+import { useTranslation } from '../i18n';
 
 /**
  * TitleBar with Runtime Profile Badge
  *
- * Shows: Assistant name • Profile • Local/Hybrid indicator • Connection status
+ * Shows: Assistant name - Profile - Local/Hybrid indicator - Connection status
  * Per UI System Prompt: "The user always knows where computation happens"
  */
 function TitleBar({ isConnected, isElectron, uiState, onShowRuntimeOverview }) {
+  const { t } = useTranslation();
   const handleMinimize = () => windowControls.minimize();
   const handleMaximize = () => windowControls.maximize();
   const handleClose = () => windowControls.close();
 
   // Extract profile info from uiState
-  const profileName = uiState?.profile?.name || 'loading...';
+  const profileName = uiState?.profile?.name || t('titlebar.loading');
   const isLocalFirst = uiState?.profile?.is_local_first ?? true;
 
   // Profile badge colors
@@ -32,7 +34,7 @@ function TitleBar({ isConnected, isElectron, uiState, onShowRuntimeOverview }) {
         {/* Logo and Name */}
         <div className="title-bar-logo">
           <span className="logo-icon">A</span>
-          <span className="logo-text">Antonio Evo</span>
+          <span className="logo-text">{t('titlebar.antonioEvo')}</span>
         </div>
 
         {/* Runtime Status Badges */}
@@ -40,7 +42,7 @@ function TitleBar({ isConnected, isElectron, uiState, onShowRuntimeOverview }) {
           className="runtime-badges"
           onClick={onShowRuntimeOverview}
           style={{ cursor: 'pointer' }}
-          title="Click for Runtime Overview"
+          title={t('titlebar.runtimeOverview')}
         >
           {/* Profile Badge */}
           <span
@@ -52,13 +54,13 @@ function TitleBar({ isConnected, isElectron, uiState, onShowRuntimeOverview }) {
 
           {/* Local/Hybrid Indicator */}
           <span className={`badge mode-badge ${isLocalFirst ? 'local' : 'hybrid'}`}>
-            {isLocalFirst ? 'Local-first' : 'Hybrid'}
+            {isLocalFirst ? t('titlebar.localFirst') : t('titlebar.hybrid')}
           </span>
 
           {/* Connection Status */}
           <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
             <span className="status-dot"></span>
-            <span className="status-text">{isConnected ? 'Connected' : 'Offline'}</span>
+            <span className="status-text">{isConnected ? t('titlebar.connected') : t('titlebar.offline')}</span>
           </div>
         </div>
       </div>
@@ -66,17 +68,17 @@ function TitleBar({ isConnected, isElectron, uiState, onShowRuntimeOverview }) {
       {/* Window Controls (Electron only) */}
       {isElectron && (
         <div className="title-bar-controls">
-          <button className="title-bar-btn minimize" onClick={handleMinimize} title="Minimize">
+          <button className="title-bar-btn minimize" onClick={handleMinimize} title={t('titlebar.minimize')}>
             <svg width="12" height="12" viewBox="0 0 12 12">
               <rect y="5" width="12" height="2" fill="currentColor" />
             </svg>
           </button>
-          <button className="title-bar-btn maximize" onClick={handleMaximize} title="Maximize">
+          <button className="title-bar-btn maximize" onClick={handleMaximize} title={t('titlebar.maximize')}>
             <svg width="12" height="12" viewBox="0 0 12 12">
               <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" />
             </svg>
           </button>
-          <button className="title-bar-btn close" onClick={handleClose} title="Close">
+          <button className="title-bar-btn close" onClick={handleClose} title={t('titlebar.close')}>
             <svg width="12" height="12" viewBox="0 0 12 12">
               <path d="M1 1L11 11M1 11L11 1" stroke="currentColor" strokeWidth="2" />
             </svg>

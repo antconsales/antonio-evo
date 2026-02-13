@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../i18n';
 
 function RuntimeOverviewPanel({ uiState, onClose }) {
   const [llmStatus, setLlmStatus] = useState(null);
   const [memoryStats, setMemoryStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { t } = useTranslation();
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -32,7 +34,7 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
     return (
       <div className="runtime-overlay" onClick={onClose}>
         <div className="runtime-panel" onClick={(e) => e.stopPropagation()}>
-          <div className="runtime-loading">Loading...</div>
+          <div className="runtime-loading">{t('runtime.loadingText')}</div>
         </div>
       </div>
     );
@@ -71,7 +73,7 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
         <div className="runtime-content">
           {/* Profile Section */}
           <div className="runtime-section">
-            <h3>Runtime Profile</h3>
+            <h3>{t('runtime.runtimeProfile')}</h3>
             <div
               className="profile-card"
               style={{ borderColor: getProfileColor(profile.name) }}
@@ -83,7 +85,7 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
               <div className="profile-details">
                 <span className="profile-name">{profile.name || 'unknown'}</span>
                 <span className="profile-type">
-                  {profile.is_local_first ? 'Local-First' : 'Hybrid Mode'}
+                  {profile.is_local_first ? t('runtime.localFirst') : t('runtime.hybridMode')}
                 </span>
               </div>
             </div>
@@ -91,26 +93,26 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
 
           {/* Connections Section */}
           <div className="runtime-section">
-            <h3>Connections</h3>
+            <h3>{t('runtime.connections')}</h3>
             <div className="connection-grid">
               <div className={`connection-item ${connection.local_llm ? 'active' : ''}`}>
                 <span className="connection-dot" />
-                <span>Local LLM</span>
+                <span>{t('runtime.localLlm')}</span>
               </div>
               <div className={`connection-item ${connection.memory ? 'active' : ''}`}>
                 <span className="connection-dot" />
-                <span>Memory</span>
+                <span>{t('runtime.memory')}</span>
               </div>
               <div className={`connection-item ${connection.rag ? 'active' : ''}`}>
                 <span className="connection-dot" />
-                <span>RAG</span>
+                <span>{t('runtime.rag')}</span>
               </div>
             </div>
           </div>
 
           {/* Features Section */}
           <div className="runtime-section">
-            <h3>Active Features</h3>
+            <h3>{t('runtime.activeFeatures')}</h3>
             <div className="features-grid">
               {Object.entries(features).map(([key, value]) => (
                 <div
@@ -129,13 +131,13 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
           {/* Memory Stats */}
           {memoryStats && (
             <div className="runtime-section">
-              <h3>Memory</h3>
+              <h3>{t('runtime.memoryTitle')}</h3>
               <div className="stats-row">
-                <span>Total Neurons</span>
+                <span>{t('runtime.totalNeurons')}</span>
                 <strong>{memoryStats.total_neurons || 0}</strong>
               </div>
               <div className="stats-row">
-                <span>Avg Confidence</span>
+                <span>{t('runtime.avgConfidence')}</span>
                 <strong>{((memoryStats.avg_confidence || 0) * 100).toFixed(0)}%</strong>
               </div>
             </div>
@@ -144,7 +146,7 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
           {/* LLM Status */}
           {llmStatus && llmStatus.endpoints && (
             <div className="runtime-section">
-              <h3>LLM Endpoints</h3>
+              <h3>{t('runtime.llmEndpoints')}</h3>
               {Object.entries(llmStatus.endpoints).map(([name, info]) => (
                 <div key={name} className="endpoint-item">
                   <div className="endpoint-header">
@@ -161,7 +163,7 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
 
           {/* Consent Status */}
           <div className="runtime-section">
-            <h3>Consent Settings</h3>
+            <h3>{t('runtime.consentSettings')}</h3>
             <div className="consent-grid">
               {Object.entries(consent).map(([key, value]) => (
                 <div
@@ -183,17 +185,17 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
           {/* Pending Items */}
           {uiState.pending && (uiState.pending.tasks > 0 || uiState.pending.insights > 0) && (
             <div className="runtime-section pending-section">
-              <h3>Pending</h3>
+              <h3>{t('runtime.pending')}</h3>
               {uiState.pending.tasks > 0 && (
                 <div className="pending-item tasks">
                   <span className="pending-count">{uiState.pending.tasks}</span>
-                  <span>Tasks awaiting approval</span>
+                  <span>{t('runtime.tasksAwaiting')}</span>
                 </div>
               )}
               {uiState.pending.insights > 0 && (
                 <div className="pending-item insights">
                   <span className="pending-count">{uiState.pending.insights}</span>
-                  <span>New insights</span>
+                  <span>{t('runtime.newInsights')}</span>
                 </div>
               )}
             </div>
@@ -201,7 +203,7 @@ function RuntimeOverviewPanel({ uiState, onClose }) {
         </div>
 
         <div className="runtime-footer">
-          <span className="session-id">Session: {uiState.session_id || 'N/A'}</span>
+          <span className="session-id">{t('runtime.session', { id: uiState.session_id || 'N/A' })}</span>
         </div>
       </div>
     </div>

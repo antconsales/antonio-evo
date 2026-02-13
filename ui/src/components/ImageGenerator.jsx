@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../i18n';
 
 const GALLERY_KEY = 'antonio_image_gallery';
 
@@ -14,6 +15,7 @@ function ImageGenerator({ isConnected }) {
     height: 512,
     steps: 8,
   });
+  const { t } = useTranslation();
 
   // Load gallery from localStorage on mount
   useEffect(() => {
@@ -78,10 +80,10 @@ function ImageGenerator({ isConnected }) {
         setGallery(newGallery);
         saveGallery(newGallery);
       } else {
-        setError(data.error || 'Generation failed');
+        setError(data.error || t('image.generationFailed'));
       }
     } catch (err) {
-      setError(err.message || 'Connection error');
+      setError(err.message || t('image.connectionError'));
     } finally {
       setIsGenerating(false);
     }
@@ -97,7 +99,7 @@ function ImageGenerator({ isConnected }) {
   };
 
   const handleClearGallery = () => {
-    if (window.confirm('Clear all images from gallery?')) {
+    if (window.confirm(t('image.clearGalleryConfirm'))) {
       setGallery([]);
       saveGallery([]);
       setSelectedImage(null);
@@ -111,8 +113,8 @@ function ImageGenerator({ isConnected }) {
 
   return (
     <div className="image-generator">
-      <h2>Z-Image Turbo</h2>
-      <p className="subtitle">Text-to-Image Generation (CPU)</p>
+      <h2>{t('image.title')}</h2>
+      <p className="subtitle">{t('image.subtitle')}</p>
 
       <div className="generator-layout">
         {/* Left: Form and current result */}
@@ -121,14 +123,14 @@ function ImageGenerator({ isConnected }) {
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the image you want to generate..."
+              placeholder={t('image.promptPlaceholder')}
               disabled={isGenerating || !isConnected}
               rows={3}
             />
 
             <div className="generator-settings">
               <label>
-                Size:
+                {t('image.size')}
                 <select
                   value={`${settings.width}x${settings.height}`}
                   onChange={(e) => {
@@ -137,22 +139,22 @@ function ImageGenerator({ isConnected }) {
                   }}
                   disabled={isGenerating}
                 >
-                  <option value="256x256">256x256 (Fast)</option>
-                  <option value="512x512">512x512 (Default)</option>
-                  <option value="768x768">768x768 (Large)</option>
+                  <option value="256x256">{t('image.sizeFast')}</option>
+                  <option value="512x512">{t('image.sizeDefault')}</option>
+                  <option value="768x768">{t('image.sizeLarge')}</option>
                 </select>
               </label>
 
               <label>
-                Steps:
+                {t('image.steps')}
                 <select
                   value={settings.steps}
                   onChange={(e) => setSettings((s) => ({ ...s, steps: Number(e.target.value) }))}
                   disabled={isGenerating}
                 >
-                  <option value="4">4 (Fast)</option>
-                  <option value="8">8 (Default)</option>
-                  <option value="12">12 (Quality)</option>
+                  <option value="4">{t('image.stepsFast')}</option>
+                  <option value="8">{t('image.stepsDefault')}</option>
+                  <option value="12">{t('image.stepsQuality')}</option>
                 </select>
               </label>
             </div>
@@ -165,10 +167,10 @@ function ImageGenerator({ isConnected }) {
               {isGenerating ? (
                 <>
                   <span className="spinner"></span>
-                  Generating...
+                  {t('image.generating')}
                 </>
               ) : (
-                'Generate Image'
+                t('image.generateImage')
               )}
             </button>
           </form>
@@ -182,7 +184,7 @@ function ImageGenerator({ isConnected }) {
           {/* Current generated image */}
           {generatedImage && !selectedImage && (
             <div className="generated-result">
-              <h3>Generated Image</h3>
+              <h3>{t('image.generatedImage')}</h3>
               <div className="image-preview-large">
                 <img
                   src={generatedImage.url}
@@ -192,21 +194,21 @@ function ImageGenerator({ isConnected }) {
                 />
               </div>
               <div className="image-info">
-                <p><strong>Prompt:</strong> {generatedImage.prompt}</p>
-                <p><strong>Size:</strong> {generatedImage.width}x{generatedImage.height} | <strong>Steps:</strong> {generatedImage.steps} | <strong>Time:</strong> {generatedImage.time?.toFixed(1)}s</p>
+                <p><strong>{t('image.prompt')}</strong> {generatedImage.prompt}</p>
+                <p><strong>{t('image.sizeLabel')}</strong> {generatedImage.width}x{generatedImage.height} | <strong>{t('image.stepsLabel')}</strong> {generatedImage.steps} | <strong>{t('image.timeLabel')}</strong> {generatedImage.time?.toFixed(1)}s</p>
                 <div className="image-actions">
                   <a
                     href={generatedImage.url}
                     download={`zimage_${generatedImage.id}.png`}
                     className="action-btn primary"
                   >
-                    Download
+                    {t('image.download')}
                   </a>
                   <button
                     className="action-btn"
                     onClick={() => setPrompt(generatedImage.prompt)}
                   >
-                    Reuse Prompt
+                    {t('image.reusePrompt')}
                   </button>
                 </div>
               </div>
@@ -217,9 +219,9 @@ function ImageGenerator({ isConnected }) {
           {selectedImage && (
             <div className="generated-result">
               <div className="result-header">
-                <h3>Image Details</h3>
+                <h3>{t('image.imageDetails')}</h3>
                 <button className="close-preview" onClick={() => setSelectedImage(null)}>
-                  Close
+                  {t('image.closePlaceholder')}
                 </button>
               </div>
               <div className="image-preview-large">
@@ -230,28 +232,28 @@ function ImageGenerator({ isConnected }) {
                 />
               </div>
               <div className="image-info">
-                <p><strong>Prompt:</strong> {selectedImage.prompt}</p>
-                <p><strong>Size:</strong> {selectedImage.width}x{selectedImage.height} | <strong>Steps:</strong> {selectedImage.steps}</p>
-                <p><strong>Created:</strong> {formatDate(selectedImage.createdAt)}</p>
+                <p><strong>{t('image.prompt')}</strong> {selectedImage.prompt}</p>
+                <p><strong>{t('image.sizeLabel')}</strong> {selectedImage.width}x{selectedImage.height} | <strong>{t('image.stepsLabel')}</strong> {selectedImage.steps}</p>
+                <p><strong>{t('image.createdLabel')}</strong> {formatDate(selectedImage.createdAt)}</p>
                 <div className="image-actions">
                   <a
                     href={selectedImage.url}
                     download={`zimage_${selectedImage.id}.png`}
                     className="action-btn primary"
                   >
-                    Download
+                    {t('image.download')}
                   </a>
                   <button
                     className="action-btn"
                     onClick={() => setPrompt(selectedImage.prompt)}
                   >
-                    Reuse Prompt
+                    {t('image.reusePrompt')}
                   </button>
                   <button
                     className="action-btn danger"
                     onClick={() => handleDeleteImage(selectedImage.id)}
                   >
-                    Delete
+                    {t('image.delete')}
                   </button>
                 </div>
               </div>
@@ -262,18 +264,18 @@ function ImageGenerator({ isConnected }) {
         {/* Right: Gallery */}
         <div className="image-gallery">
           <div className="gallery-header">
-            <h3>Gallery ({gallery.length})</h3>
+            <h3>{t('image.gallery', { count: gallery.length })}</h3>
             {gallery.length > 0 && (
               <button className="clear-gallery" onClick={handleClearGallery}>
-                Clear All
+                {t('image.clearAll')}
               </button>
             )}
           </div>
 
           {gallery.length === 0 ? (
             <div className="gallery-empty">
-              <p>No images yet</p>
-              <p className="hint">Generated images will appear here</p>
+              <p>{t('image.noImages')}</p>
+              <p className="hint">{t('image.generatedImagesHint')}</p>
             </div>
           ) : (
             <div className="gallery-grid">
@@ -297,8 +299,8 @@ function ImageGenerator({ isConnected }) {
       {isGenerating && (
         <div className="generating-overlay">
           <div className="generating-spinner"></div>
-          <p>Generating image on CPU...</p>
-          <p className="generating-hint">This may take a few minutes</p>
+          <p>{t('image.generatingOnCpu')}</p>
+          <p className="generating-hint">{t('image.generatingHint')}</p>
         </div>
       )}
     </div>

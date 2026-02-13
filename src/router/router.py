@@ -143,7 +143,7 @@ class Router:
             **mistral_base,
             "system_prompt_path": "prompts/mistral_social.txt",
             "temperature": 0.7,
-            "max_tokens": 1024,
+            "max_tokens": 384,   # ~80s on CPU at ~4.7 tok/s
             "persona_name": "SOCIAL",
         }
 
@@ -152,7 +152,7 @@ class Router:
             **mistral_base,
             "system_prompt_path": "prompts/mistral_logic.txt",
             "temperature": 0.3,
-            "max_tokens": 2048,
+            "max_tokens": 512,   # ~110s on CPU at ~4.7 tok/s
             "persona_name": "LOGIC",
         }
 
@@ -208,6 +208,14 @@ class Router:
                 if handler and hasattr(handler, 'set_document_parser'):
                     handler.set_document_parser(self.document_parser)
 
+        # Vision Service (SmolVLM2 via Ollama - shared across text handlers)
+        self.vision_service = self._init_vision_service(handlers_config)
+        if self.vision_service:
+            for handler_enum in (Handler.TEXT_LOCAL, Handler.TEXT_SOCIAL, Handler.TEXT_LOGIC):
+                handler = self.handlers.get(handler_enum)
+                if handler and hasattr(handler, 'set_vision_service'):
+                    handler.set_vision_service(self.vision_service)
+
         # Initialize sandboxes for each handler
         self.sandboxes: Dict[Handler, ProcessSandbox] = {}
         for handler_enum in self.handlers.keys():
@@ -258,12 +266,16 @@ class Router:
             timeout_seconds=config.get("timeout_seconds"),
         )
 
+    # Handlers that are pure logic (no LLM, no I/O) and don't need sandboxing.
+    # Sandboxing these on Windows can corrupt multiprocessing state on timeout.
+    _SAFE_HANDLERS = {Handler.REJECT}
+
     def route(self, request: Request, decision: PolicyDecision) -> Response:
         """
         Route request to appropriate handler via sandbox.
 
         This is the ONLY place where handlers are called.
-        All execution goes through ProcessSandbox.
+        Safe handlers (reject) run directly; all others go through ProcessSandbox.
         """
         handler = self.handlers.get(decision.handler)
 
@@ -277,6 +289,40 @@ class Router:
                     handler_reason=decision.reason
                 )
             )
+
+        # Safe handlers bypass sandbox (pure logic, no I/O)
+        if decision.handler in self._SAFE_HANDLERS:
+            import time as _time
+            _start = _time.time()
+            try:
+                result = handler.process(request)
+                _elapsed = int((_time.time() - _start) * 1000)
+                if not isinstance(result, Response):
+                    result = Response.success_response(
+                        output=result,
+                        meta=ResponseMeta(
+                            request_id=request.request_id,
+                            handler=decision.handler.value,
+                            handler_reason=decision.reason,
+                            elapsed_ms=_elapsed,
+                        )
+                    )
+                else:
+                    result.meta.request_id = request.request_id
+                    result.meta.handler = decision.handler.value
+                    result.meta.handler_reason = decision.reason
+                    result.meta.elapsed_ms = _elapsed
+                return result
+            except Exception as e:
+                return Response.error_response(
+                    error=str(e),
+                    code="HANDLER_ERROR",
+                    meta=ResponseMeta(
+                        request_id=request.request_id,
+                        handler=decision.handler.value,
+                        handler_reason=decision.reason,
+                    )
+                )
 
         # Get sandbox for this handler
         sandbox = self.sandboxes.get(decision.handler)
@@ -384,6 +430,35 @@ class Router:
             return None
         except Exception as e:
             logger.warning(f"Failed to initialize document parser: {e}")
+            return None
+
+    def _init_vision_service(self, handlers_config: Dict) -> Optional[Any]:
+        """Initialize SmolVLM2 vision service if model is available."""
+        try:
+            from ..services.vision import VisionService
+
+            vision_config = handlers_config.get("vision", {})
+            if not vision_config.get("enabled", True):
+                logger.info("Vision service disabled in config")
+                return None
+
+            # Use Ollama server URL from service config
+            if self.service_config:
+                vision_config.setdefault("base_url", self.service_config.llm_server)
+
+            service = VisionService(vision_config)
+            if service.is_available():
+                logger.info(f"Vision service (SmolVLM2) initialized, model: {service.model}")
+                return service
+            else:
+                logger.info("Vision model not available in Ollama, vision disabled")
+                return None
+
+        except ImportError:
+            logger.info("Vision service module not available")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to initialize vision service: {e}")
             return None
 
     def get_available_handlers(self) -> list:

@@ -3,7 +3,7 @@
  */
 
 const API_BASE_URL = 'http://localhost:8420';
-// TTS now uses Web Speech API (browser-native) instead of separate server
+// TTS: Piper (server-side, high quality) with Web Speech API fallback
 
 // Check if we're running in Electron
 const isElectron = () => {
@@ -13,9 +13,9 @@ const isElectron = () => {
 // Browser-based API calls
 const browserApi = {
   async health() {
-    console.log('[API] health() called, fetching:', `${API_BASE_URL}/health`);
+    console.log('[API] health() called, fetching:', `${API_BASE_URL}/api/health`);
     try {
-      const response = await fetch(`${API_BASE_URL}/health`);
+      const response = await fetch(`${API_BASE_URL}/api/health`);
       console.log('[API] health() response status:', response.status);
       const data = await response.json();
       console.log('[API] health() data:', data);
@@ -26,16 +26,15 @@ const browserApi = {
     }
   },
 
-  async ask(question, options = {}) {
+  async ask(text, options = {}) {
     try {
-      const response = await fetch(`${API_BASE_URL}/ask`, {
+      const response = await fetch(`${API_BASE_URL}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question,
-          output_mode: 'json',
-          speak: options.speak || false,
-          return_audio: options.returnAudio || false,
+          text,
+          session_id: options.sessionId || null,
+          think: options.think || false,
         }),
       });
       const data = await response.json();
@@ -47,82 +46,104 @@ const browserApi = {
 
   async listen(audioBase64, options = {}) {
     try {
-      const response = await fetch(`${API_BASE_URL}/listen`, {
+      const response = await fetch(`${API_BASE_URL}/api/listen`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           audio: audioBase64,
-          format: 'wav',
+          format: options.format || 'wav',
           process: options.process || false,
-          output_mode: 'json',
         }),
       });
       const data = await response.json();
-      return { success: true, data };
+      return { success: data.success !== false, data };
     } catch (error) {
       return { success: false, error: error.message };
     }
   },
 
   async speak(text, options = {}) {
-    // Use Web Speech API for TTS (works in all modern browsers)
+    // Try Piper TTS (server-side, high quality) first, fallback to Web Speech API
     try {
-      if (!('speechSynthesis' in window)) {
-        console.error('[TTS] Web Speech API not supported');
-        return { success: false, error: 'TTS not supported in this browser' };
+      const piperResult = await this._speakPiper(text);
+      if (piperResult.success) {
+        return piperResult;
+      }
+      console.log('[TTS] Piper unavailable, falling back to Web Speech API');
+    } catch (e) {
+      console.log('[TTS] Piper error, falling back:', e.message);
+    }
+
+    return this._speakWebSpeech(text, options);
+  },
+
+  async _speakPiper(text) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await response.json();
+
+      if (data.success && data.audio) {
+        const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+        const blob = new Blob([audioBytes], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+
+        return new Promise((resolve) => {
+          const audio = new Audio(url);
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            resolve({ success: true, source: 'piper' });
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve({ success: false, error: 'Audio playback failed' });
+          };
+          audio.play().catch(() => resolve({ success: false, error: 'Playback blocked' }));
+        });
       }
 
-      // Cancel any ongoing speech
+      return { success: false, error: data.error || 'Piper TTS failed' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  async _speakWebSpeech(text, options = {}) {
+    try {
+      if (!('speechSynthesis' in window)) {
+        return { success: false, error: 'TTS not supported' };
+      }
+
       window.speechSynthesis.cancel();
 
-      // Helper to get voices (may need to wait for them to load)
-      const getVoices = () => {
-        return new Promise((resolve) => {
-          let voices = window.speechSynthesis.getVoices();
-          if (voices.length > 0) {
-            resolve(voices);
-            return;
-          }
-          // Voices not loaded yet, wait for them
-          window.speechSynthesis.onvoiceschanged = () => {
-            voices = window.speechSynthesis.getVoices();
-            resolve(voices);
-          };
-          // Timeout fallback
-          setTimeout(() => resolve([]), 1000);
-        });
-      };
+      const getVoices = () => new Promise((resolve) => {
+        let voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) { resolve(voices); return; }
+        window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
+        setTimeout(() => resolve([]), 1000);
+      });
 
       const voices = await getVoices();
       const utterance = new SpeechSynthesisUtterance(text);
 
-      // Try to find an Italian voice, fallback to default
       const italianVoice = voices.find(v => v.lang.startsWith('it'))
         || voices.find(v => v.name.toLowerCase().includes('italian'))
         || voices[0];
 
-      if (italianVoice) {
-        utterance.voice = italianVoice;
-        console.log('[TTS] Using voice:', italianVoice.name, italianVoice.lang);
-      }
-
+      if (italianVoice) utterance.voice = italianVoice;
       utterance.rate = options.rate || 1.0;
       utterance.pitch = options.pitch || 1.0;
       utterance.volume = options.volume || 1.0;
 
       return new Promise((resolve) => {
-        utterance.onend = () => {
-          resolve({ success: true });
-        };
-        utterance.onerror = (event) => {
-          console.error('[TTS] Speech error:', event);
-          resolve({ success: false, error: event.error || 'Speech failed' });
-        };
-
+        utterance.onend = () => resolve({ success: true, source: 'web-speech' });
+        utterance.onerror = (event) => resolve({ success: false, error: event.error || 'Speech failed' });
         window.speechSynthesis.speak(utterance);
       });
     } catch (error) {
-      console.error('[TTS] Error:', error);
       return { success: false, error: error.message };
     }
   },

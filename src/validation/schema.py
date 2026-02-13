@@ -77,6 +77,7 @@ ALLOWED_SOURCES: Set[str] = {
     "dict",
     "unknown",
     "api",
+    "rest",
     "mcp",
     "websocket",
 }

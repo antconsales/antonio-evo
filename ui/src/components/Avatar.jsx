@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Avatar.css';
+import { useTranslation } from '../i18n';
 
 /**
  * Avatar Companion Component
@@ -11,55 +12,55 @@ import './Avatar.css';
  * States: idle, thinking, speaking
  */
 
-// Mood to expression mapping
+// Mood to expression mapping (labels are now translated via i18n)
 const MOOD_CONFIG = {
   neutral: {
-    emoji: '😐',
+    emoji: '\uD83D\uDE10',
     color: '#6b7280',
     animation: 'idle',
-    label: 'Pronto',
+    labelKey: 'avatar.neutral',
   },
   friendly: {
-    emoji: '😊',
+    emoji: '\uD83D\uDE0A',
     color: '#22c55e',
     animation: 'bounce',
-    label: 'Felice',
+    labelKey: 'avatar.friendly',
   },
   helpful: {
-    emoji: '🤝',
+    emoji: '\uD83E\uDD1D',
     color: '#22c55e',
     animation: 'bounce',
-    label: 'Disponibile',
+    labelKey: 'avatar.helpful',
   },
   curious: {
-    emoji: '🤔',
+    emoji: '\uD83E\uDD14',
     color: '#3b82f6',
     animation: 'tilt',
-    label: 'Curioso',
+    labelKey: 'avatar.curious',
   },
   analytical: {
-    emoji: '🧐',
+    emoji: '\uD83E\uDDD0',
     color: '#8b5cf6',
     animation: 'focus',
-    label: 'Analitico',
+    labelKey: 'avatar.analytical',
   },
   cautious: {
-    emoji: '😟',
+    emoji: '\uD83D\uDE1F',
     color: '#f59e0b',
     animation: 'shake',
-    label: 'Cauto',
+    labelKey: 'avatar.cautious',
   },
   thinking: {
-    emoji: '💭',
+    emoji: '\uD83D\uDCAD',
     color: '#6366f1',
     animation: 'pulse',
-    label: 'Pensando...',
+    labelKey: 'avatar.thinking',
   },
   error: {
-    emoji: '😓',
+    emoji: '\uD83D\uDE13',
     color: '#ef4444',
     animation: 'shake',
-    label: 'Errore',
+    labelKey: 'avatar.error',
   },
 };
 
@@ -86,6 +87,7 @@ function Avatar({
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef(null);
   const inputRef = useRef(null);
+  const { t } = useTranslation();
 
   // Update mood with animation delay
   useEffect(() => {
@@ -195,15 +197,15 @@ function Avatar({
 
       {/* Status label */}
       <div className="avatar-label">
-        {moodConfig.label}
+        {t(moodConfig.labelKey)}
       </div>
 
       {/* Expanded Mini Chat */}
       {isExpanded && (
         <div className="avatar-chat">
           <div className="chat-header">
-            <span className="chat-title">Antonio Evo</span>
-            <span className="chat-neurons">{neuronCount} neurons</span>
+            <span className="chat-title">{t('chat.antonioEvo')}</span>
+            <span className="chat-neurons">{t('avatar.neurons', { count: neuronCount })}</span>
             <button className="chat-close" onClick={onToggle}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6L6 18M6 6l12 12" />
@@ -218,7 +220,7 @@ function Avatar({
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isConnected ? 'Chiedi qualcosa...' : 'Non connesso...'}
+              placeholder={isConnected ? t('avatar.askSomething') : t('avatar.notConnected')}
               disabled={!isConnected || isThinking}
             />
             <button
@@ -233,7 +235,7 @@ function Avatar({
           </div>
 
           <div className="chat-hint">
-            Premi ESC per chiudere
+            {t('avatar.pressEscToClose')}
           </div>
         </div>
       )}

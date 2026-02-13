@@ -27,6 +27,7 @@ function App() {
     apiUrl: 'http://localhost:8420',
     useWebSocket: true, // Enable WebSocket by default
     showAvatar: true,   // Show floating avatar
+    deepThinking: false, // Enable extended reasoning (slower)
   });
 
   // Load settings, conversations and current chat from localStorage
@@ -92,6 +93,15 @@ function App() {
       console.error('Failed to save settings:', e);
     }
   }, [settings]);
+
+  // Apply dark/light mode class to document root
+  useEffect(() => {
+    if (settings.darkMode) {
+      document.documentElement.classList.remove('light-mode');
+    } else {
+      document.documentElement.classList.add('light-mode');
+    }
+  }, [settings.darkMode]);
 
   // Create new conversation if none exists when first message is sent
   const ensureConversation = useCallback(() => {
@@ -331,6 +341,7 @@ function App() {
       const result = await api.ask(text, {
         speak: settings.speakResponses,
         returnAudio: false,
+        think: settings.deepThinking,
       });
 
       let responseText = 'No response';

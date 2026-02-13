@@ -61,6 +61,15 @@ class Attachment:
                           '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala']
         return any(self.name.lower().endswith(ext) for ext in code_extensions)
 
+    def is_pdf(self) -> bool:
+        """Check if attachment is a PDF document."""
+        return (self.type == "application/pdf" or
+                self.name.lower().endswith('.pdf'))
+
+    def is_document(self) -> bool:
+        """Check if attachment is a parseable document (image or PDF)."""
+        return self.is_image() or self.is_pdf()
+
 
 class Modality(Enum):
     """Supported input/output modalities."""

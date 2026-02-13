@@ -92,6 +92,16 @@
         "max_memory_mb": 256,
         "max_cpu_percent": 50
       }
+    },
+    "document_parser": {
+      "enabled": true,
+      "model_id": "yifeihu/dots.llm.ocr.1.7B",
+      "device": "cpu",
+      "max_pages": 5,
+      "max_image_size": 10000000,
+      "timeout_seconds": 60,
+      "use_http": false,
+      "http_url": "http://localhost:8805"
     }
   }
 }

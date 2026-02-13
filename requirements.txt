@@ -23,6 +23,11 @@ Pillow>=9.0.0
 diffusers>=0.27.0
 accelerate>=0.25.0
 
+# DOCUMENT PARSING (dots.ocr - image/PDF text extraction in chat)
+# Uncomment to enable OCR on image/PDF attachments
+# pymupdf>=1.23.0        # PDF to image conversion
+# qwen_vl_utils>=0.1.0   # Required by dots.ocr VLM
+
 # OPTIONAL - External APIs (install only if using fallback)
 # anthropic>=0.18.0
 # openai>=1.0.0

@@ -200,6 +200,14 @@ class Router:
             Handler.REJECT: RejectionHandler(),
         }
 
+        # Document Parser service (dots.ocr - shared across text handlers)
+        self.document_parser = self._init_document_parser(handlers_config)
+        if self.document_parser:
+            for handler_enum in (Handler.TEXT_LOCAL, Handler.TEXT_SOCIAL, Handler.TEXT_LOGIC):
+                handler = self.handlers.get(handler_enum)
+                if handler and hasattr(handler, 'set_document_parser'):
+                    handler.set_document_parser(self.document_parser)
+
         # Initialize sandboxes for each handler
         self.sandboxes: Dict[Handler, ProcessSandbox] = {}
         for handler_enum in self.handlers.keys():
@@ -352,6 +360,31 @@ class Router:
             code=error_code,
             meta=meta,
         )
+
+    def _init_document_parser(self, handlers_config: Dict) -> Optional[Any]:
+        """Initialize document parser (dots.ocr) if configured and available."""
+        try:
+            from ..services.document_parser import DocumentParser
+
+            parser_config = handlers_config.get("document_parser", {})
+            if not parser_config.get("enabled", True):
+                logger.info("Document parser disabled in config")
+                return None
+
+            parser = DocumentParser(parser_config)
+            if parser.is_available():
+                logger.info("Document parser (dots.ocr) initialized")
+                return parser
+            else:
+                logger.info("Document parser dependencies not available, OCR disabled")
+                return None
+
+        except ImportError:
+            logger.info("Document parser module not available")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to initialize document parser: {e}")
+            return None
 
     def get_available_handlers(self) -> list:
         """Return list of available handlers."""

@@ -49,6 +49,13 @@ class MistralHandler(BaseHandler):
 
         self._system_prompt = self._load_system_prompt()
 
+        # Document parser (injected by Router, optional)
+        self._document_parser = None
+
+    def set_document_parser(self, parser):
+        """Inject document parser service for image/PDF OCR."""
+        self._document_parser = parser
+
     def _load_system_prompt(self) -> str:
         """Load system prompt from configured file."""
         # Force conversational prompt for SOCIAL persona
@@ -204,6 +211,8 @@ Analyze and respond with JSON containing: analysis, conclusion, confidence, cave
                 is_code = getattr(att, 'is_code', lambda: False)()
                 is_image = getattr(att, 'is_image', lambda: False)()
 
+                is_pdf = getattr(att, 'is_pdf', lambda: False)()
+
                 if is_text or is_code:
                     try:
                         if data:
@@ -218,8 +227,27 @@ Analyze and respond with JSON containing: analysis, conclusion, confidence, cave
                             context_parts.append(f"\n[{name}] (empty)")
                     except Exception:
                         context_parts.append(f"\n[{name}] (could not decode)")
-                elif is_image:
-                    context_parts.append(f"\n[{name}] (Image: {mime_type}, {size/1024:.1f}KB)")
+                elif is_image or is_pdf:
+                    # Try document parsing via dots.ocr
+                    parse_result = None
+                    if self._document_parser:
+                        try:
+                            parse_result = self._document_parser.parse_attachment(att)
+                        except Exception as e:
+                            print(f"[MISTRAL DEBUG] Document parser error: {e}")
+
+                    if parse_result and parse_result.success and parse_result.text:
+                        label = "PDF content" if is_pdf else "Image text"
+                        truncated = parse_result.text[:8000]
+                        if len(parse_result.text) > 8000:
+                            truncated += "\n... (truncated)"
+                        context_parts.append(
+                            f"\n[{name}] ({label} extracted via OCR, {parse_result.elapsed_ms}ms)\n```\n{truncated}\n```"
+                        )
+                    elif is_image:
+                        context_parts.append(f"\n[{name}] (Image: {mime_type}, {size/1024:.1f}KB)")
+                    else:
+                        context_parts.append(f"\n[{name}] (PDF: {size/1024:.1f}KB, OCR not available)")
                 else:
                     context_parts.append(f"\n[{name}] ({mime_type})")
             except Exception:

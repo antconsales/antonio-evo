@@ -9,9 +9,11 @@ Includes:
 - LLMManager: Multi-LLM awareness
 - TaskManager: Task system with approval workflow
 - SystemPromptManager: Dynamic system prompt builder
+- DocumentParser: OCR/VLM document parsing (v4.1)
 """
 
 from .ollama_warmup import OllamaWarmup
+from .document_parser import DocumentParser, DocumentParseResult
 from .proactive import PatternAnalyzer, ProactiveService
 from .personality import PersonalityEvolutionEngine, FeedbackSignal, PersonalityTrait
 from .digital_twin import DigitalTwin
@@ -44,4 +46,6 @@ __all__ = [
     "SystemPromptManager",
     "PromptContext",
     "get_prompt_manager",
+    "DocumentParser",
+    "DocumentParseResult",
 ]

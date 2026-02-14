@@ -316,7 +316,12 @@ class Router:
             import time as _time
             _start = _time.time()
             try:
-                result = handler.process(request)
+                # v6.0: Use streaming if chunk_callback available and handler supports it
+                chunk_callback = request.metadata.get("_chunk_callback") if hasattr(request, 'metadata') and request.metadata else None
+                if chunk_callback and hasattr(handler, 'process_streaming'):
+                    result = handler.process_streaming(request, chunk_callback=chunk_callback)
+                else:
+                    result = handler.process(request)
                 _elapsed = int((_time.time() - _start) * 1000)
                 if not isinstance(result, Response):
                     result = Response.success_response(

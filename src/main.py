@@ -188,10 +188,28 @@ class Orchestrator:
         # Web Search Service (Tavily)
         self.web_search_service = self._init_web_search()
 
+        # Soul Engine (v6.0 - Deep Identity)
+        self.soul_engine = None
+        self._init_soul()
+
+        # Channels (v6.0 - Multi-platform messaging)
+        self.channels = {}
+
+        # Context Compactor (v6.0 - Long conversation handling)
+        self.context_compactor = None
+        self._init_context_compactor()
+
+        # Plugin System (v6.0 - Extensibility)
+        self.plugin_manager = None
+        self.hook_registry = None
+
         # Tool System (v5.0 - Agentic Tool Use)
         self.tool_registry = None
         self.tool_executor = None
         self._init_tools()
+
+        # Initialize plugins after tools (so plugins can register tools)
+        self._init_plugins()
 
         self.pipeline = PipelineExecutor(
             normalizer=normalizer,
@@ -210,6 +228,10 @@ class Orchestrator:
             webhook_service=self.webhook_service,
             web_search_service=self.web_search_service,
         )
+
+        # Inject hook registry into pipeline (v6.0)
+        if self.hook_registry:
+            self.pipeline.hook_registry = self.hook_registry
 
         # Health Monitor (all dependencies injected)
         self.health_monitor = HealthMonitor(
@@ -308,6 +330,123 @@ class Orchestrator:
             logger.warning(f"Failed to initialize Webhook Service: {e}")
             return None
 
+    def _init_soul(self) -> None:
+        """Initialize Soul Engine (v6.0) - deep identity system."""
+        try:
+            from .services.soul import SoulEngine
+
+            soul_config = self._load_config("config/soul.json")
+            self.soul_engine = SoulEngine(soul_config)
+
+            # Connect personality and emotional services
+            if self.personality_engine:
+                self.soul_engine.set_personality_engine(self.personality_engine)
+            if self.emotional_memory:
+                self.soul_engine.set_emotional_memory(self.emotional_memory)
+
+            # Inject into text handlers
+            from .models.policy import Handler
+            for handler_enum in (Handler.TEXT_LOCAL, Handler.TEXT_SOCIAL, Handler.TEXT_LOGIC):
+                handler = self.router.handlers.get(handler_enum)
+                if handler and hasattr(handler, 'set_soul_engine'):
+                    handler.set_soul_engine(self.soul_engine)
+
+            logger.info(f"Soul Engine (v6.0) initialized: {self.soul_engine.name} v{self.soul_engine.version}")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize Soul Engine: {e}")
+            self.soul_engine = None
+
+    def init_channels(self) -> None:
+        """Initialize and start messaging channels (v6.0). Called by websocket_server after boot."""
+        try:
+            channels_config = self._load_config("config/channels.json")
+
+            # Telegram channel
+            tg_config = channels_config.get("telegram", {})
+            if tg_config.get("enabled") and tg_config.get("token"):
+                from .channels.telegram import TelegramChannel
+                tg = TelegramChannel(tg_config, self)
+                if tg.start():
+                    self.channels["telegram"] = tg
+                    logger.info("Telegram channel started")
+                else:
+                    logger.warning("Telegram channel failed to start")
+
+            if self.channels:
+                logger.info(f"Channels (v6.0): {len(self.channels)} active ({', '.join(self.channels.keys())})")
+            else:
+                logger.info("Channels (v6.0): none configured")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize channels: {e}")
+
+    def _init_plugins(self) -> None:
+        """Initialize Plugin System (v6.0) - extensibility framework."""
+        try:
+            from .plugins import PluginManager, HookRegistry
+
+            self.hook_registry = HookRegistry()
+            self.plugin_manager = PluginManager(
+                tool_registry=self.tool_registry,
+                hook_registry=self.hook_registry,
+            )
+
+            # Load plugins from plugins/ directory
+            loaded = self.plugin_manager.load_plugins("plugins")
+
+            # Emit startup hook
+            self.hook_registry.emit("on_startup", {
+                "version": "6.0",
+                "tools": len(self.tool_registry) if self.tool_registry else 0,
+            })
+
+            if loaded > 0:
+                logger.info(f"Plugin System (v6.0): {loaded} plugins loaded")
+            else:
+                logger.info("Plugin System (v6.0) initialized (no plugins)")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize Plugin System: {e}")
+            self.plugin_manager = None
+            self.hook_registry = None
+
+    def _init_context_compactor(self) -> None:
+        """Initialize Context Compactor (v6.0) for long conversation handling."""
+        try:
+            from .services.context_compactor import ContextCompactor
+
+            compactor_config = {
+                "max_context_tokens": 3000,
+                "compaction_threshold": 4000,
+                "keep_recent_turns": 4,
+                "ollama_url": self.service_config.llm_server,
+                "ollama_model": self.service_config.ollama_model,
+            }
+            self.context_compactor = ContextCompactor(compactor_config)
+
+            # Inject into text handlers
+            from .models.policy import Handler
+            for handler_enum in (Handler.TEXT_LOCAL, Handler.TEXT_SOCIAL, Handler.TEXT_LOGIC):
+                handler = self.router.handlers.get(handler_enum)
+                if handler and hasattr(handler, 'set_context_compactor'):
+                    handler.set_context_compactor(self.context_compactor)
+
+            logger.info("Context Compactor (v6.0) initialized")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize Context Compactor: {e}")
+            self.context_compactor = None
+
+    def stop_channels(self) -> None:
+        """Stop all active channels."""
+        for name, channel in self.channels.items():
+            try:
+                channel.stop()
+                logger.info(f"Channel {name} stopped")
+            except Exception as e:
+                logger.warning(f"Failed to stop channel {name}: {e}")
+
     def _register_tool(self, registry, definition: dict, handler):
         """Helper to register a tool from its DEFINITION dict and handler."""
         registry.register(
@@ -359,7 +498,7 @@ class Orchestrator:
             self.tool_executor = None
 
     def _inject_tools_into_handlers(self) -> None:
-        """Inject tool registry and executor into text handlers."""
+        """Inject tool registry, executor, and LLM manager into text handlers."""
         if not self.tool_registry or not self.tool_executor:
             return
 
@@ -369,6 +508,9 @@ class Orchestrator:
             if handler and hasattr(handler, 'set_tool_registry'):
                 handler.set_tool_registry(self.tool_registry)
                 handler.set_tool_executor(self.tool_executor)
+            # v6.0: Inject LLM Manager for multi-provider failover
+            if handler and hasattr(handler, 'set_llm_manager') and self.llm_manager:
+                handler.set_llm_manager(self.llm_manager)
 
     def _init_web_search(self):
         """Initialize Tavily Web Search Service."""
@@ -412,7 +554,7 @@ class Orchestrator:
         """End the current session."""
         self.session_manager.end_session()
 
-    def process(self, raw_input: Union[str, Dict[str, Any]], tool_callback=None) -> Dict[str, Any]:
+    def process(self, raw_input: Union[str, Dict[str, Any]], tool_callback=None, chunk_callback=None) -> Dict[str, Any]:
         """
         Process a single request.
 
@@ -422,8 +564,9 @@ class Orchestrator:
         Args:
             raw_input: User input (string or dict)
             tool_callback: Optional callback for real-time tool action events (v5.0)
+            chunk_callback: Optional callback for streaming text chunks (v6.0)
         """
-        return self.pipeline.execute(raw_input, tool_callback=tool_callback)
+        return self.pipeline.execute(raw_input, tool_callback=tool_callback, chunk_callback=chunk_callback)
 
     def health_check(self) -> Dict[str, Any]:
         """

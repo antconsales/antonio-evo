@@ -1,0 +1,9 @@
+{
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "allowed_users": [],
+    "max_message_length": 4096,
+    "send_thinking": true
+  }
+}

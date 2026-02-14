@@ -249,10 +249,27 @@ def create_app() -> "FastAPI":
                 except Exception:
                     pass  # Don't break pipeline if WS send fails
 
+            # v6.0: Create chunk callback bridge for streaming tokens
+            chunk_index = [0]  # mutable counter for closure
+
+            def chunk_callback(token_text: str):
+                """Bridge sync streaming tokens to async WebSocket."""
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        send_event(websocket, WSEventType.RESPONSE_CHUNK, {
+                            "text": token_text,
+                            "index": chunk_index[0],
+                        }),
+                        loop,
+                    )
+                    chunk_index[0] += 1
+                except Exception:
+                    pass  # Don't break pipeline if WS send fails
+
             # Process in thread pool (orchestrator is sync)
             result = await loop.run_in_executor(
                 None,
-                lambda: orchestrator.process(input_data, tool_callback=tool_callback),
+                lambda: orchestrator.process(input_data, tool_callback=tool_callback, chunk_callback=chunk_callback),
             )
 
             # Extract data
@@ -262,7 +279,10 @@ def create_app() -> "FastAPI":
             meta = result.get("_meta", {})
 
             # Extract text from output (can be string or dict)
+            # If output is empty but there's an error, use the error message
             output = _extract_response_text(raw_output)
+            if not output and result.get("error"):
+                output = f"Error: {result['error']}"
 
             persona = decision.get("persona", "social")
             mood = _determine_mood(result)
@@ -1205,9 +1225,15 @@ def create_app() -> "FastAPI":
     async def serve_image(filename: str):
         """Serve generated images."""
         from fastapi.responses import FileResponse
-        image_path = Path("output/images") / filename
+        # Use absolute path based on project root to avoid CWD issues
+        project_root = Path(__file__).parent.parent.parent
+        image_path = project_root / "output" / "images" / filename
         if image_path.exists():
             return FileResponse(str(image_path), media_type="image/png")
+        # Fallback: try relative path
+        fallback_path = Path("output/images") / filename
+        if fallback_path.exists():
+            return FileResponse(str(fallback_path), media_type="image/png")
         raise HTTPException(status_code=404, detail="Image not found")
 
     # ===================
@@ -2135,6 +2161,30 @@ def create_app() -> "FastAPI":
         """End current session."""
         orchestrator.end_session()
         return {"success": True}
+
+    # ===================
+    # Channels API (v6.0)
+    # ===================
+
+    @app.get("/api/channels")
+    async def get_channels():
+        """List all configured channels and their status."""
+        channels_status = {}
+        for name, channel in orchestrator.channels.items():
+            if hasattr(channel, 'get_status'):
+                channels_status[name] = channel.get_status()
+            else:
+                channels_status[name] = {"name": name, "running": True}
+        return {"channels": channels_status}
+
+    # ===================
+    # Startup hook: init channels
+    # ===================
+
+    @app.on_event("startup")
+    async def startup_init_channels():
+        """Initialize messaging channels after server starts."""
+        orchestrator.init_channels()
 
     return app
 

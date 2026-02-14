@@ -15,7 +15,7 @@ from .registry import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
 
-MAX_OUTPUT_CHARS = 8000
+MAX_OUTPUT_CHARS = 4000
 
 
 class ToolExecutor:

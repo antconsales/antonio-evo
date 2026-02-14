@@ -171,6 +171,13 @@ export class AntonioWebSocket {
         });
         break;
 
+      case 'response_chunk':
+        this._emit('chunk', {
+          text: data.text || '',
+          index: data.index || 0,
+        });
+        break;
+
       case 'tool_action_start':
         this._emit('tool_action_start', {
           tool: data.tool,

@@ -57,12 +57,27 @@ function MessageBubble({ message }) {
           <div key={att.id || index} className="message-attachment">
             {att.type?.startsWith('image/') ? (
               <div className="attachment-image-wrapper" onClick={() => openImageInLightbox(att)}>
-                <img
-                  src={att.data || att.preview}
-                  alt={att.name}
-                  className="attachment-image"
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
+                {(att.data || att.preview) ? (
+                  <img
+                    src={att.data || att.preview}
+                    alt={att.name}
+                    className="attachment-image"
+                    onError={(e) => {
+                      // Show placeholder instead of hiding completely
+                      e.target.onerror = null;
+                      e.target.style.display = 'none';
+                      if (e.target.nextElementSibling) {
+                        e.target.nextElementSibling.style.display = 'flex';
+                      }
+                    }}
+                  />
+                ) : null}
+                {/* Placeholder shown when image fails to load or data is missing */}
+                <div className="attachment-image-fallback" style={{ display: (att.data || att.preview) ? 'none' : 'flex' }}>
+                  <Image size={24} />
+                  <span>{att.name}</span>
+                  <span className="attachment-file-size">{formatFileSize(att.size)}</span>
+                </div>
                 <div className="attachment-image-overlay">
                   <ExternalLink size={20} />
                 </div>
@@ -194,7 +209,10 @@ function MessageBubble({ message }) {
               src={lightboxImage.data || lightboxImage.preview}
               alt={lightboxImage.name}
               className="lightbox-image"
-              onError={(e) => { e.target.style.display = 'none'; }}
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.alt = `Failed to load: ${lightboxImage.name}`;
+              }}
             />
             <div className="lightbox-footer">
               <span>{lightboxImage.name}</span>

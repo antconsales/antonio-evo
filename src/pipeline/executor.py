@@ -73,7 +73,10 @@ class PipelineExecutor:
         # Web search service (Tavily)
         self.web_search_service = web_search_service
 
-    def execute(self, raw_input: Union[str, Dict[str, Any]], tool_callback=None) -> Dict[str, Any]:
+        # Hook registry (v6.0 plugin system)
+        self.hook_registry = None
+
+    def execute(self, raw_input: Union[str, Dict[str, Any]], tool_callback=None, chunk_callback=None) -> Dict[str, Any]:
         """
         Process a single request through the 8-step pipeline.
 
@@ -83,6 +86,7 @@ class PipelineExecutor:
         Args:
             raw_input: User input (string or dict with text, attachments, etc.)
             tool_callback: Optional callback for tool action events (v5.0)
+            chunk_callback: Optional callback for streaming text chunks (v6.0)
         """
         start_time = time.time()
         memory_operation = None
@@ -137,6 +141,15 @@ class PipelineExecutor:
         if tool_callback:
             request.metadata["_tool_callback"] = tool_callback
 
+        # === STEP 2.7: Inject chunk callback (v6.0) ===
+        # Streaming tokens from MistralHandler to WebSocket client
+        if chunk_callback:
+            request.metadata["_chunk_callback"] = chunk_callback
+
+        # === STEP 2.8: Plugin pre_process hook (v6.0) ===
+        if self.hook_registry:
+            self.hook_registry.emit("pre_process", {"text": request.text, "session_id": request.session_id})
+
         # === STEP 3: Classify (memory-informed) ===
         classification = self.classifier.classify(request)
 
@@ -159,6 +172,14 @@ class PipelineExecutor:
             classification=classification,
             elapsed_ms=elapsed_ms
         )
+
+        # === STEP 6.1: Plugin post_process hook (v6.0) ===
+        if self.hook_registry:
+            self.hook_registry.emit("post_process", {
+                "success": response.get("success", False) if isinstance(response, dict) else True,
+                "handler": decision.handler.value if decision else None,
+                "elapsed_ms": elapsed_ms,
+            })
 
         # === STEP 7: Create Neuron (if successful) ===
         neuron = None

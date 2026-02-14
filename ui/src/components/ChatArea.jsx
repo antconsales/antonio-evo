@@ -5,7 +5,7 @@ import ToolActionIndicator from './ToolActionIndicator';
 import { Paperclip, Send, X, Image, FileText, File } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
-function ChatArea({ messages, onSendMessage, isLoading, isConnected, activeToolActions = [] }) {
+function ChatArea({ messages, onSendMessage, isLoading, isConnected, activeToolActions = [], streamingText = '' }) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState([]);
   const messagesEndRef = useRef(null);
@@ -13,10 +13,10 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected, activeToolA
   const fileInputRef = useRef(null);
   const { t } = useTranslation();
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or streaming updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, streamingText]);
 
   // Focus input on mount
   useEffect(() => {
@@ -156,15 +156,30 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected, activeToolA
             ))}
             {isLoading && (
               <div className="message assistant loading">
-                <div className="message-content">
-                  {activeToolActions.length > 0 ? (
+                <div className="message-avatar">
+                  <span className="assistant-avatar">A</span>
+                </div>
+                <div className="message-body">
+                  {activeToolActions.length > 0 && (
                     <ToolActionIndicator actions={activeToolActions} />
-                  ) : (
-                    <div className="typing-indicator">
-                      <span></span>
-                      <span></span>
-                      <span></span>
+                  )}
+                  {streamingText ? (
+                    <div className="message-content streaming-content">
+                      {streamingText.split('\n').map((line, i) => (
+                        <p key={i}>{line}</p>
+                      ))}
+                      <span className="streaming-cursor">|</span>
                     </div>
+                  ) : (
+                    !activeToolActions.length && (
+                      <div className="message-content">
+                        <div className="typing-indicator">
+                          <span></span>
+                          <span></span>
+                          <span></span>
+                        </div>
+                      </div>
+                    )
                   )}
                 </div>
               </div>

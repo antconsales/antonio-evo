@@ -668,6 +668,24 @@ body {
   }
 }
 
+/* Streaming cursor (v6.0) */
+.streaming-content {
+  min-height: 1.5em;
+}
+
+.streaming-cursor {
+  display: inline-block;
+  animation: blink-cursor 0.8s step-end infinite;
+  color: var(--primary);
+  font-weight: bold;
+  margin-left: 1px;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* ============================================
    Input Area
    ============================================ */
@@ -1425,6 +1443,20 @@ body {
   color: white;
 }
 
+.gallery-item-broken {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 80px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-align: center;
+  padding: 8px;
+}
+
 /* Generated result improvements */
 .generated-result h3 {
   font-size: 16px;
@@ -2141,6 +2173,29 @@ body {
 
 .attachment-image-wrapper:hover .attachment-image-overlay {
   opacity: 1;
+}
+
+.attachment-image-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 180px;
+  min-height: 100px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.attachment-image-fallback span {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attachment-file {

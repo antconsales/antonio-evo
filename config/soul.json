@@ -1,0 +1,7 @@
+{
+  "soul_path": "prompts/soul.md",
+  "enable_personality_adaptation": true,
+  "enable_emotional_adaptation": true,
+  "name": "Antonio",
+  "version": "6.0"
+}

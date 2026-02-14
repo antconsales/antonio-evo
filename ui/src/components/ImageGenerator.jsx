@@ -285,7 +285,20 @@ function ImageGenerator({ isConnected }) {
                   className={`gallery-item ${selectedImage?.id === img.id ? 'selected' : ''}`}
                   onClick={() => setSelectedImage(img)}
                 >
-                  <img src={img.url} alt={img.prompt} />
+                  <img
+                    src={img.url}
+                    alt={img.prompt}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.style.display = 'none';
+                      if (e.target.nextElementSibling) {
+                        e.target.nextElementSibling.style.display = 'flex';
+                      }
+                    }}
+                  />
+                  <div className="gallery-item-broken" style={{ display: 'none' }}>
+                    <span>{t('image.imageUnavailable') || 'Image unavailable'}</span>
+                  </div>
                   <div className="gallery-item-overlay">
                     <span className="gallery-item-time">{img.time?.toFixed(1)}s</span>
                   </div>

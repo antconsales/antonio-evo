@@ -19,6 +19,7 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [currentView, setCurrentView] = useState('chat'); // 'chat' | 'images' | 'settings'
   const [settings, setSettings] = useState({
@@ -60,11 +61,27 @@ function App() {
     }
   }, []);
 
-  // Save messages when they change
+  // Save messages when they change (strip large base64 data to fit localStorage)
   useEffect(() => {
     if (currentConversationId && messages.length > 0) {
       try {
-        localStorage.setItem(`${CHAT_HISTORY_KEY}_${currentConversationId}`, JSON.stringify(messages));
+        // Strip base64 data from attachments to prevent localStorage quota overflow
+        const messagesForStorage = messages.map(msg => {
+          if (!msg.attachments || msg.attachments.length === 0) return msg;
+          return {
+            ...msg,
+            attachments: msg.attachments.map(att => ({
+              id: att.id,
+              name: att.name,
+              type: att.type,
+              size: att.size,
+              // Don't store full base64 data - it can be several MB per image
+              data: att.data && att.data.length > 10000 ? null : att.data,
+              preview: null, // blob URLs don't persist anyway
+            })),
+          };
+        });
+        localStorage.setItem(`${CHAT_HISTORY_KEY}_${currentConversationId}`, JSON.stringify(messagesForStorage));
 
         // Update conversation metadata
         const updatedConversations = conversations.map(conv =>
@@ -230,13 +247,19 @@ function App() {
         );
       }),
 
+      // v6.0: Streaming text chunks
+      ws.on('chunk', ({ text }) => {
+        setStreamingText((prev) => prev + text);
+      }),
+
       ws.on('response', (data) => {
+        const responseText = data.text || (data.error ? `Error: ${data.error}` : 'No response');
         const assistantMessage = {
           id: Date.now(),
           role: 'assistant',
-          content: data.text || 'No response',
+          content: responseText,
           timestamp: new Date().toISOString(),
-          success: true,
+          success: data.success !== false,
           meta: {
             elapsed_ms: data.elapsedMs,
             handler: data.handler,
@@ -247,6 +270,7 @@ function App() {
         };
         setMessages((prev) => [...prev, assistantMessage]);
         setIsLoading(false);
+        setStreamingText('');
         setActiveToolActions([]);
 
         // Update mood
@@ -279,6 +303,7 @@ function App() {
         };
         setMessages((prev) => [...prev, errorMessage]);
         setIsLoading(false);
+        setStreamingText('');
         setActiveToolActions([]);
         setCurrentMood('error');
       }),
@@ -468,6 +493,7 @@ function App() {
             isLoading={isLoading}
             isConnected={isConnected}
             activeToolActions={activeToolActions}
+            streamingText={streamingText}
           />
         );
     }

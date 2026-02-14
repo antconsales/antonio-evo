@@ -163,10 +163,12 @@ class Orchestrator:
             else:
                 logger.info("Digital Twin (v3.0) disabled by profile")
 
-        # RAG components (optional)
+        # RAG components (v7.0 - config/rag.json, local file-based mode by default)
         self.rag = None
-        if self.service_config.rag_enabled:
-            self._init_rag()
+        self._rag_config = {}
+        rag_json = self._load_config(f"{config_dir}/rag.json")
+        if rag_json.get("enabled", self.service_config.rag_enabled):
+            self._init_rag(rag_json)
 
         # Ollama warm-up (optional but recommended)
         self.warmup = None
@@ -227,6 +229,8 @@ class Orchestrator:
             digital_twin=self.digital_twin,
             webhook_service=self.webhook_service,
             web_search_service=self.web_search_service,
+            rag_client=self.rag,
+            rag_config=self._rag_config,
         )
 
         # Inject hook registry into pipeline (v6.0)
@@ -270,26 +274,36 @@ class Orchestrator:
             logger.warning(f"Failed to initialize Ollama warm-up: {e}")
             self.warmup = None
 
-    def _init_rag(self) -> None:
-        """Initialize RAG components."""
+    def _init_rag(self, rag_json: dict = None) -> None:
+        """Initialize RAG components (v7.0 - config/rag.json based)."""
         try:
             from .rag.qdrant_client import QdrantRAG
 
+            rag_json = rag_json or {}
+            self._rag_config = rag_json
+
+            # Determine server_url: local file-based or HTTP server
+            mode = rag_json.get("mode", "local")
+            if mode == "local":
+                server_url = rag_json.get("local_path", "data/qdrant_local")
+            else:
+                server_url = rag_json.get("server_url", self.service_config.qdrant_server)
+
             rag_config = {
-                "server_url": self.service_config.qdrant_server,
-                "embedding_model": self.service_config.rag_embedding_model,
-                "docs_path": self.service_config.rag_docs_path,
-                "chunk_size": self.service_config.rag_chunk_size,
-                "chunk_overlap": self.service_config.rag_chunk_overlap,
-                "top_k": self.service_config.rag_top_k
+                "server_url": server_url,
+                "embedding_model": rag_json.get("embedding_model", self.service_config.rag_embedding_model),
+                "docs_path": rag_json.get("docs_path", self.service_config.rag_docs_path),
+                "chunk_size": rag_json.get("chunk_size", self.service_config.rag_chunk_size),
+                "chunk_overlap": rag_json.get("chunk_overlap", self.service_config.rag_chunk_overlap),
+                "top_k": rag_json.get("top_k", self.service_config.rag_top_k),
             }
 
             self.rag = QdrantRAG(rag_config)
 
             if self.rag.is_available():
-                logger.info("RAG initialized successfully")
+                logger.info(f"RAG (v7.0) initialized — mode={mode}, docs={rag_config['docs_path']}")
             else:
-                logger.warning("RAG initialized but not available (check Qdrant)")
+                logger.warning("RAG initialized but not available (check dependencies)")
 
         except ImportError as e:
             logger.warning(f"RAG dependencies not available: {e}")
@@ -372,6 +386,17 @@ class Orchestrator:
                     logger.info("Telegram channel started")
                 else:
                     logger.warning("Telegram channel failed to start")
+
+            # Discord channel (v7.0)
+            dc_config = channels_config.get("discord", {})
+            if dc_config.get("enabled") and dc_config.get("token"):
+                from .channels.discord import DiscordChannel
+                dc = DiscordChannel(dc_config, self)
+                if dc.start():
+                    self.channels["discord"] = dc
+                    logger.info("Discord channel started")
+                else:
+                    logger.warning("Discord channel failed to start")
 
             if self.channels:
                 logger.info(f"Channels (v6.0): {len(self.channels)} active ({', '.join(self.channels.keys())})")
@@ -483,6 +508,11 @@ class Orchestrator:
             if vision_service:
                 from .tools.image_analysis import DEFINITION as ia_def, create_handler as ia_handler
                 self._register_tool(registry, ia_def, ia_handler(vision_service))
+
+            # Knowledge Search tool (v7.0 - wraps existing RAG client)
+            if self.rag and self.rag.is_available():
+                from .tools.knowledge_search import DEFINITION as ks_def, create_handler as ks_handler
+                self._register_tool(registry, ks_def, ks_handler(self.rag))
 
             self.tool_registry = registry
             self.tool_executor = ToolExecutor(registry)

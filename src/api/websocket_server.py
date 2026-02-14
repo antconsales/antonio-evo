@@ -1337,32 +1337,16 @@ def create_app() -> "FastAPI":
         chunks_indexed: int = 0
         error: Optional[str] = None
 
-    _rag_client = None
-
-    def get_rag_client():
-        nonlocal _rag_client
-        if _rag_client is None:
-            try:
-                from ..rag.qdrant_client import QdrantRAG
-                _rag_client = QdrantRAG({
-                    "server_url": "data/qdrant",  # Local file-based storage
-                    "embedding_model": "all-MiniLM-L6-v2",
-                    "docs_path": "data/knowledge",
-                    "chunk_size": 512,
-                    "chunk_overlap": 50,
-                    "top_k": 5,
-                })
-            except ImportError:
-                return None
-        return _rag_client
+    # v7.0: Use orchestrator.rag instead of separate client
+    def _get_rag():
+        """Get RAG client from orchestrator (v7.0 — single instance)."""
+        return orchestrator.rag if orchestrator.rag and orchestrator.rag.is_available() else None
 
     @app.post("/api/rag/search", response_model=RAGSearchResponse)
     async def rag_search(request: RAGSearchRequest):
-        """
-        Search documents using semantic search (RAG).
-        """
-        client = get_rag_client()
-        if client is None or not client.is_available():
+        """Search documents using semantic search (RAG)."""
+        client = _get_rag()
+        if client is None:
             return RAGSearchResponse(
                 success=False,
                 error="RAG not available. Install: pip install qdrant-client sentence-transformers"
@@ -1371,37 +1355,24 @@ def create_app() -> "FastAPI":
         try:
             loop = asyncio.get_event_loop()
             results = await loop.run_in_executor(
-                None,
-                client.search,
-                request.query,
-                request.limit
+                None, client.search, request.query, request.limit
             )
 
             return RAGSearchResponse(
                 success=True,
                 results=[
-                    {
-                        "text": r.text,
-                        "source": r.source,
-                        "score": r.score,
-                        "metadata": r.metadata,
-                    }
+                    {"text": r.text, "source": r.source, "score": r.score, "metadata": r.metadata}
                     for r in results
                 ]
             )
         except Exception as e:
-            return RAGSearchResponse(
-                success=False,
-                error=str(e)
-            )
+            return RAGSearchResponse(success=False, error=str(e))
 
     @app.post("/api/rag/index", response_model=RAGIndexResponse)
     async def rag_index():
-        """
-        Index documents from the knowledge directory.
-        """
-        client = get_rag_client()
-        if client is None or not client.is_available():
+        """Index documents from the knowledge directory."""
+        client = _get_rag()
+        if client is None:
             return RAGIndexResponse(
                 success=False,
                 error="RAG not available. Install: pip install qdrant-client sentence-transformers"
@@ -1409,31 +1380,47 @@ def create_app() -> "FastAPI":
 
         try:
             loop = asyncio.get_event_loop()
-            chunks_indexed = await loop.run_in_executor(
-                None,
-                client.index_documents
-            )
-
-            return RAGIndexResponse(
-                success=True,
-                chunks_indexed=chunks_indexed
-            )
+            chunks_indexed = await loop.run_in_executor(None, client.index_documents)
+            return RAGIndexResponse(success=True, chunks_indexed=chunks_indexed)
         except Exception as e:
-            return RAGIndexResponse(
-                success=False,
-                error=str(e)
-            )
+            return RAGIndexResponse(success=False, error=str(e))
 
     @app.get("/api/rag/stats")
     async def rag_stats():
-        """
-        Get RAG statistics.
-        """
-        client = get_rag_client()
-        if client is None:
-            return {"available": False, "error": "RAG dependencies not installed"}
+        """Get RAG statistics."""
+        if not orchestrator.rag:
+            return {"available": False, "error": "RAG not initialized"}
+        return orchestrator.rag.get_stats()
 
-        return client.get_stats()
+    @app.post("/api/rag/upload")
+    async def rag_upload(file: UploadFile = File(...)):
+        """Upload a document to the knowledge base and index it (v7.0)."""
+        client = _get_rag()
+        if client is None:
+            return {"success": False, "error": "RAG not available"}
+
+        filename = file.filename or "unknown.txt"
+        if not any(filename.lower().endswith(ext) for ext in ['.md', '.txt', '.markdown']):
+            return {"success": False, "error": "Only .md and .txt files are supported"}
+
+        content = await file.read()
+
+        # Save to knowledge directory
+        import os
+        docs_path = client.docs_path
+        os.makedirs(docs_path, exist_ok=True)
+
+        file_path = os.path.join(docs_path, filename)
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        # Re-index entire knowledge directory
+        try:
+            loop = asyncio.get_event_loop()
+            chunks = await loop.run_in_executor(None, client.index_documents)
+            return {"success": True, "filename": filename, "chunks_indexed": chunks}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     # ===================
     # Runtime Profiles

@@ -3,7 +3,10 @@ import { useTranslation } from '../i18n';
 
 const API_BASE_URL = 'http://localhost:8420';
 
-function VoiceButton({ onResult, disabled }) {
+// BCP-47 language map for Web Speech API (v7.0)
+const LANG_MAP = { en: 'en-US', it: 'it-IT', fr: 'fr-FR', es: 'es-ES' };
+
+function VoiceButton({ onResult, disabled, language = 'en' }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [useServerTranscription, setUseServerTranscription] = useState(false);
@@ -115,7 +118,7 @@ function VoiceButton({ onResult, disabled }) {
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang = 'it-IT';
+    recognition.lang = LANG_MAP[language] || 'en-US';
 
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
@@ -158,7 +161,7 @@ function VoiceButton({ onResult, disabled }) {
         } catch (e) {}
       }
     };
-  }, [handleResult, useServerTranscription]);
+  }, [handleResult, useServerTranscription, language]);
 
   const startRecording = () => {
     if (useServerTranscription) {

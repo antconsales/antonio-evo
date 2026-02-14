@@ -5,5 +5,13 @@
     "allowed_users": [],
     "max_message_length": 4096,
     "send_thinking": true
+  },
+  "discord": {
+    "enabled": false,
+    "token": "",
+    "allowed_users": [],
+    "allowed_channels": [],
+    "use_embeds": true,
+    "send_thinking": true
   }
 }

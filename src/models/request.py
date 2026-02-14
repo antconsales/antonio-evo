@@ -127,6 +127,10 @@ class Request:
     # Contains user emotional state, trends, and tone recommendations
     emotional_context: Optional[Any] = None  # Type: EmotionalContext (avoid circular import)
 
+    # Knowledge context (v7.0 - populated by RAG auto-enrichment before classification)
+    # Contains relevant document chunks from the local knowledge base
+    knowledge_context: Optional[str] = None
+
     # Session tracking
     session_id: Optional[str] = None
 
@@ -155,6 +159,10 @@ class Request:
         # Include emotional context if available (v2.1)
         if self.emotional_context is not None:
             result["emotional_context"] = self.emotional_context.to_dict()
+
+        # Include knowledge context summary if available (v7.0)
+        if self.knowledge_context is not None:
+            result["knowledge_context"] = self.knowledge_context[:500]
 
         return result
 

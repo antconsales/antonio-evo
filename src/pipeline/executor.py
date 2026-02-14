@@ -45,6 +45,8 @@ class PipelineExecutor:
         digital_twin=None,
         webhook_service=None,
         web_search_service=None,
+        rag_client=None,
+        rag_config=None,
     ):
         """
         Initialize pipeline with all required components.
@@ -72,6 +74,10 @@ class PipelineExecutor:
 
         # Web search service (Tavily)
         self.web_search_service = web_search_service
+
+        # RAG client + config (v7.0 knowledge base)
+        self.rag_client = rag_client
+        self.rag_config = rag_config or {}
 
         # Hook registry (v6.0 plugin system)
         self.hook_registry = None
@@ -130,6 +136,31 @@ class PipelineExecutor:
             except Exception:
                 request.emotional_context = None
 
+        # === STEP 2.2: Knowledge Context (v7.0 RAG auto-enrichment) ===
+        if (self.rag_client and self.rag_client.is_available()
+                and self.rag_config.get("auto_enrich", False)):
+            try:
+                results = self.rag_client.search(
+                    query=request.text,
+                    limit=self.rag_config.get("top_k", 3),
+                )
+                score_threshold = self.rag_config.get("score_threshold", 0.3)
+                filtered = [r for r in results if r.score >= score_threshold]
+                if filtered:
+                    max_chars = self.rag_config.get("max_context_chars", 2000)
+                    parts = []
+                    total = 0
+                    for r in filtered:
+                        chunk = f"[{r.source}] {r.text}"
+                        if total + len(chunk) > max_chars:
+                            break
+                        parts.append(chunk)
+                        total += len(chunk)
+                    request.knowledge_context = "\n---\n".join(parts)
+                    logger.debug(f"RAG enrichment: {len(filtered)} docs, {total} chars")
+            except Exception:
+                request.knowledge_context = None
+
         # === STEP 2.5: Preprocess Image Attachments ===
         # Analyze images BEFORE routing to avoid sandbox subprocess issues
         # (VisionService HTTP calls fail inside Windows multiprocessing.Process)
@@ -145,6 +176,10 @@ class PipelineExecutor:
         # Streaming tokens from MistralHandler to WebSocket client
         if chunk_callback:
             request.metadata["_chunk_callback"] = chunk_callback
+
+        # === STEP 2.7.1: Inject knowledge context into metadata (v7.0) ===
+        if request.knowledge_context:
+            request.metadata["_knowledge_context"] = request.knowledge_context
 
         # === STEP 2.8: Plugin pre_process hook (v6.0) ===
         if self.hook_registry:

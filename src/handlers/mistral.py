@@ -541,7 +541,16 @@ class MistralHandler(BaseHandler):
         if metadata and '_web_search' in metadata:
             web_context = metadata['_web_search']
 
-        extra_context = attachment_context + web_context
+        # Add knowledge base context if available (v7.0 RAG auto-enrichment)
+        knowledge_context = ""
+        if metadata and '_knowledge_context' in metadata:
+            knowledge_context = (
+                f"\n\n--- KNOWLEDGE BASE CONTEXT ---\n"
+                f"{metadata['_knowledge_context']}\n"
+                f"--- END KNOWLEDGE ---\n"
+            )
+
+        extra_context = attachment_context + web_context + knowledge_context
 
         if task_type == "classify":
             return f"""TASK: CLASSIFY

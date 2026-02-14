@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, ExternalLink, AlertCircle, Webhook, Play, Loader2, Search, Globe } from 'lucide-react';
+import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, ExternalLink, AlertCircle, Webhook, Play, Loader2, Search, Globe, Database, Upload, RefreshCw } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
 function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
@@ -39,12 +39,19 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
   const [webSearchTestLoading, setWebSearchTestLoading] = useState(false);
   const [showWebSearchKey, setShowWebSearchKey] = useState(false);
 
+  // Knowledge Base state (v7.0)
+  const [ragStats, setRagStats] = useState(null);
+  const [ragIndexing, setRagIndexing] = useState(false);
+  const [ragUploading, setRagUploading] = useState(false);
+  const [ragUploadResult, setRagUploadResult] = useState(null);
+
   useEffect(() => {
     loadServerInfo();
     loadApiKeys();
     loadExternalApis();
     loadWebhooks();
     loadWebSearchConfig();
+    loadRagStats();
   }, []);
 
   const loadServerInfo = async () => {
@@ -303,6 +310,59 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
     setTimeout(() => setWebSearchTestResult(null), 8000);
   };
 
+  // === Knowledge Base / RAG functions (v7.0) ===
+  const loadRagStats = async () => {
+    try {
+      const res = await fetch('http://localhost:8420/api/rag/stats');
+      const data = await res.json();
+      if (data.success !== false) {
+        setRagStats(data);
+      }
+    } catch (e) {
+      console.error('Failed to load RAG stats:', e);
+      setRagStats(null);
+    }
+  };
+
+  const reindexDocuments = async () => {
+    setRagIndexing(true);
+    try {
+      const res = await fetch('http://localhost:8420/api/rag/index', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        await loadRagStats();
+      }
+    } catch (e) {
+      console.error('Failed to re-index:', e);
+    }
+    setRagIndexing(false);
+  };
+
+  const handleRagFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRagUploading(true);
+    setRagUploadResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('http://localhost:8420/api/rag/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      setRagUploadResult(data);
+      if (data.success !== false) {
+        await loadRagStats();
+      }
+    } catch (err) {
+      setRagUploadResult({ success: false, error: 'Upload failed' });
+    }
+    setRagUploading(false);
+    e.target.value = '';
+    setTimeout(() => setRagUploadResult(null), 6000);
+  };
+
   const handleChange = (key, value) => {
     const newSettings = { ...localSettings, [key]: value };
     setLocalSettings(newSettings);
@@ -350,6 +410,12 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
           onClick={() => setActiveTab('webhooks')}
         >
           {t('settings.webhooks')}
+        </button>
+        <button
+          className={`settings-tab ${activeTab === 'knowledge' ? 'active' : ''}`}
+          onClick={() => setActiveTab('knowledge')}
+        >
+          {t('settings.knowledgeBase')}
         </button>
       </div>
 
@@ -405,7 +471,7 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
               )}
             </section>
 
-            {/* Voice Section */}
+            {/* Voice Section (v7.0 enhanced) */}
             <section className="settings-section">
               <h3>{t('settings.voice')}</h3>
               <div className="setting-item">
@@ -421,6 +487,40 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                   />
                   <span className="toggle-slider"></span>
                 </label>
+              </div>
+              <div className="setting-item">
+                <div className="setting-info">
+                  <label>{t('settings.voiceLanguage')}</label>
+                  <p className="setting-description">{t('settings.voiceLanguageDesc')}</p>
+                </div>
+                <select
+                  value={language}
+                  onChange={(e) => changeLanguage(e.target.value)}
+                  className="language-select"
+                >
+                  <option value="en">English</option>
+                  <option value="it">Italiano</option>
+                  <option value="fr">Fran&ccedil;ais</option>
+                  <option value="es">Espa&ntilde;ol</option>
+                </select>
+              </div>
+              <div className="setting-item">
+                <div className="setting-info">
+                  <label>{t('settings.voiceSpeed')}</label>
+                  <p className="setting-description">{t('settings.voiceSpeedDesc')}</p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.1"
+                    value={localSettings.voiceSpeed || 1.0}
+                    onChange={(e) => handleChange('voiceSpeed', parseFloat(e.target.value))}
+                    style={{ width: '120px' }}
+                  />
+                  <span style={{ fontSize: '12px', opacity: 0.7 }}>{localSettings.voiceSpeed || 1.0}x</span>
+                </div>
               </div>
             </section>
 
@@ -932,6 +1032,101 @@ function SettingsPanel({ settings, onSettingsChange, onClose, isConnected }) {
                     <Plus size={16} />
                     {t('settings.addEndpoint')}
                   </button>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* Knowledge Base Tab (v7.0) */}
+        {activeTab === 'knowledge' && (
+          <>
+            <section className="settings-section">
+              <h3><Database size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '6px' }} />{t('settings.knowledgeBase')}</h3>
+              <p className="section-description">
+                {t('settings.knowledgeDesc')}
+              </p>
+
+              {/* RAG Status */}
+              <div className="setting-item">
+                <div className="setting-info">
+                  <label>{t('settings.ragStatus')}</label>
+                </div>
+                <div className={`status-indicator ${ragStats?.available ? 'connected' : 'disconnected'}`}>
+                  {ragStats?.available ? t('settings.ragAvailable') : t('settings.ragUnavailable')}
+                </div>
+              </div>
+
+              {/* Stats */}
+              {ragStats?.available && (
+                <div className="server-info-card">
+                  <div className="info-row">
+                    <span>{t('settings.indexedChunks')}</span>
+                    <span>{ragStats.total_chunks ?? 0}</span>
+                  </div>
+                  <div className="info-row">
+                    <span>{t('settings.embeddingModel')}</span>
+                    <span>{ragStats.embedding_model || 'all-MiniLM-L6-v2'}</span>
+                  </div>
+                  <div className="info-row">
+                    <span>{t('settings.docsPath')}</span>
+                    <span>{ragStats.docs_path || 'data/knowledge'}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                <button
+                  className="add-api-btn"
+                  onClick={reindexDocuments}
+                  disabled={ragIndexing || !ragStats?.available}
+                >
+                  {ragIndexing ? (
+                    <><Loader2 size={16} className="spinning" /> {t('settings.indexing')}</>
+                  ) : (
+                    <><RefreshCw size={16} /> {t('settings.reindexDocuments')}</>
+                  )}
+                </button>
+                <label className="add-api-btn" style={{ cursor: ragUploading || !ragStats?.available ? 'not-allowed' : 'pointer', opacity: ragUploading || !ragStats?.available ? 0.5 : 1 }}>
+                  {ragUploading ? (
+                    <><Loader2 size={16} className="spinning" /> {t('settings.uploading')}</>
+                  ) : (
+                    <><Upload size={16} /> {t('settings.uploadDocument')}</>
+                  )}
+                  <input
+                    type="file"
+                    accept=".md,.txt"
+                    onChange={handleRagFileUpload}
+                    disabled={ragUploading || !ragStats?.available}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </div>
+
+              {/* Upload result feedback */}
+              {ragUploadResult && (
+                <div className={`new-key-alert ${ragUploadResult.success !== false ? '' : 'error'}`} style={{ marginTop: '8px' }}>
+                  <AlertCircle size={18} />
+                  <span>
+                    {ragUploadResult.success !== false
+                      ? t('settings.uploadSuccess', { name: ragUploadResult.filename || 'file' })
+                      : t('settings.uploadError', { error: ragUploadResult.error || 'Unknown error' })
+                    }
+                  </span>
+                </div>
+              )}
+            </section>
+
+            {/* How it works */}
+            <section className="settings-section">
+              <h3>{t('settings.howRagWorks')}</h3>
+              <div className="api-docs-card">
+                <p>{t('settings.ragHowDesc')}</p>
+                <div style={{ marginTop: '8px', fontSize: '0.85em', color: 'var(--text-secondary)' }}>
+                  1. {t('settings.ragStep1')}<br />
+                  2. {t('settings.ragStep2')}<br />
+                  3. {t('settings.ragStep3')}
                 </div>
               </div>
             </section>

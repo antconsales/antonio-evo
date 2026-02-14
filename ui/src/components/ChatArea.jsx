@@ -11,7 +11,7 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected, activeToolA
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
 
   // Auto-scroll to bottom when new messages arrive or streaming updates
   useEffect(() => {
@@ -261,7 +261,7 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected, activeToolA
               rows={1}
             />
             <div className="input-actions">
-              <VoiceButton onResult={handleVoiceResult} disabled={!isConnected || isLoading} />
+              <VoiceButton onResult={handleVoiceResult} disabled={!isConnected || isLoading} language={language} />
               <button
                 type="submit"
                 className="send-btn"

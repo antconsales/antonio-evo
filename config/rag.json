@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "mode": "local",
+  "local_path": "data/qdrant_local",
+  "server_url": "http://localhost:6333",
+  "embedding_model": "all-MiniLM-L6-v2",
+  "docs_path": "data/knowledge",
+  "chunk_size": 512,
+  "chunk_overlap": 50,
+  "top_k": 3,
+  "score_threshold": 0.3,
+  "auto_enrich": true,
+  "max_context_chars": 2000,
+  "_comment": "mode: 'local' uses file-based Qdrant (no server). 'server' uses server_url."
+}

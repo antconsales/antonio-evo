@@ -103,6 +103,10 @@ class WSEventType:
     PONG = "pong"                       # Keep-alive pong
     CONNECTED = "connected"             # Connection established
 
+    # Tool System (v5.0)
+    TOOL_ACTION_START = "tool_action_start"  # Tool execution starting
+    TOOL_ACTION_END = "tool_action_end"      # Tool execution completed
+
 
 def create_app() -> "FastAPI":
     """Create FastAPI application."""
@@ -232,12 +236,23 @@ def create_app() -> "FastAPI":
             if attachments:
                 input_data["attachments"] = attachments
 
-            # Process in thread pool (orchestrator is sync)
+            # v5.0: Create tool callback bridge (async WS <- sync pipeline)
             loop = asyncio.get_event_loop()
+
+            def tool_callback(event_type: str, data: dict):
+                """Bridge sync tool events to async WebSocket."""
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        send_event(websocket, event_type, data),
+                        loop,
+                    )
+                except Exception:
+                    pass  # Don't break pipeline if WS send fails
+
+            # Process in thread pool (orchestrator is sync)
             result = await loop.run_in_executor(
                 None,
-                orchestrator.process,
-                input_data,
+                lambda: orchestrator.process(input_data, tool_callback=tool_callback),
             )
 
             # Extract data
@@ -261,6 +276,9 @@ def create_app() -> "FastAPI":
             # Get emotional context for response (v2.1)
             emotional = meta.get("emotional", {})
 
+            # Get tools used from metadata (v5.0)
+            tools_used = meta.get("tools_used", [])
+
             # Send response
             await send_event(websocket, WSEventType.RESPONSE, {
                 "success": success,
@@ -276,6 +294,8 @@ def create_app() -> "FastAPI":
                 "user_emotion": emotional.get("user_state"),
                 "tone_recommendation": emotional.get("tone_recommendation"),
                 "emotional_trend": emotional.get("trend"),
+                # Tool use (v5.0)
+                "tools_used": tools_used,
             })
 
         except Exception as e:

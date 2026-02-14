@@ -54,6 +54,9 @@ from .session.session_manager import SessionManager
 from .pipeline.executor import PipelineExecutor
 from .health.monitor import HealthMonitor
 
+# Tool system (v5.0)
+from .tools import ToolRegistry, ToolExecutor
+
 logger = logging.getLogger(__name__)
 
 
@@ -185,6 +188,11 @@ class Orchestrator:
         # Web Search Service (Tavily)
         self.web_search_service = self._init_web_search()
 
+        # Tool System (v5.0 - Agentic Tool Use)
+        self.tool_registry = None
+        self.tool_executor = None
+        self._init_tools()
+
         self.pipeline = PipelineExecutor(
             normalizer=normalizer,
             classifier=classifier,
@@ -300,6 +308,68 @@ class Orchestrator:
             logger.warning(f"Failed to initialize Webhook Service: {e}")
             return None
 
+    def _register_tool(self, registry, definition: dict, handler):
+        """Helper to register a tool from its DEFINITION dict and handler."""
+        registry.register(
+            name=definition["name"],
+            description=definition["description"],
+            parameters=definition["parameters"],
+            handler=handler,
+        )
+
+    def _init_tools(self) -> None:
+        """Initialize Tool System (v5.0) - registry, tools, executor."""
+        try:
+            registry = ToolRegistry()
+
+            # Web Search tool (wraps existing Tavily service)
+            from .tools.web_search import DEFINITION as ws_def, create_handler as ws_handler
+            if self.web_search_service:
+                self._register_tool(registry, ws_def, ws_handler(self.web_search_service))
+
+            # File operations tools (read, write, list)
+            from .tools.file_ops import DEFINITIONS as fo_defs, create_handlers as fo_handlers
+            file_handlers = fo_handlers()
+            for defn in fo_defs:
+                handler = file_handlers.get(defn["name"])
+                if handler:
+                    self._register_tool(registry, defn, handler)
+
+            # Code execution tool
+            from .tools.code_exec import DEFINITION as ce_def, create_handler as ce_handler
+            self._register_tool(registry, ce_def, ce_handler())
+
+            # Image analysis tool (wraps existing VisionService)
+            vision_service = getattr(self.router, 'vision_service', None)
+            if vision_service:
+                from .tools.image_analysis import DEFINITION as ia_def, create_handler as ia_handler
+                self._register_tool(registry, ia_def, ia_handler(vision_service))
+
+            self.tool_registry = registry
+            self.tool_executor = ToolExecutor(registry)
+
+            # Inject tools into text handlers
+            self._inject_tools_into_handlers()
+
+            logger.info(f"Tool System (v5.0): {len(registry)} tools registered ({', '.join(registry.tool_names)})")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize Tool System: {e}")
+            self.tool_registry = None
+            self.tool_executor = None
+
+    def _inject_tools_into_handlers(self) -> None:
+        """Inject tool registry and executor into text handlers."""
+        if not self.tool_registry or not self.tool_executor:
+            return
+
+        from .models.policy import Handler
+        for handler_enum in (Handler.TEXT_LOCAL, Handler.TEXT_SOCIAL, Handler.TEXT_LOGIC):
+            handler = self.router.handlers.get(handler_enum)
+            if handler and hasattr(handler, 'set_tool_registry'):
+                handler.set_tool_registry(self.tool_registry)
+                handler.set_tool_executor(self.tool_executor)
+
     def _init_web_search(self):
         """Initialize Tavily Web Search Service."""
         try:
@@ -342,14 +412,18 @@ class Orchestrator:
         """End the current session."""
         self.session_manager.end_session()
 
-    def process(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def process(self, raw_input: Union[str, Dict[str, Any]], tool_callback=None) -> Dict[str, Any]:
         """
         Process a single request.
 
         SYNCHRONOUS. One request in, one response out.
         Delegates to PipelineExecutor.
+
+        Args:
+            raw_input: User input (string or dict)
+            tool_callback: Optional callback for real-time tool action events (v5.0)
         """
-        return self.pipeline.execute(raw_input)
+        return self.pipeline.execute(raw_input, tool_callback=tool_callback)
 
     def health_check(self) -> Dict[str, Any]:
         """

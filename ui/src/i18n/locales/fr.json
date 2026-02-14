@@ -238,5 +238,17 @@
     "voiceInput": "Saisie vocale",
     "voiceOutput": "Sortie vocale",
     "newChat": "Nouvelle discussion"
+  },
+  "tools": {
+    "searchingWeb": "Recherche sur le web",
+    "readingFile": "Lecture du fichier",
+    "writingFile": "Ecriture du fichier",
+    "listingDirectory": "Liste du dossier",
+    "executingCode": "Execution du code",
+    "analyzingImage": "Analyse de l'image",
+    "usingTool": "Utilisation de l'outil",
+    "toolsUsed": "Outils utilises",
+    "toolFailed": "Outil echoue",
+    "maxIterationsReached": "Iterations maximales atteintes"
   }
 }

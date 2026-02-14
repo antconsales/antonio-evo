@@ -270,12 +270,33 @@ class Router:
     # Sandboxing these on Windows can corrupt multiprocessing state on timeout.
     _SAFE_HANDLERS = {Handler.REJECT}
 
+    def _should_bypass_sandbox(self, decision: PolicyDecision) -> bool:
+        """
+        Check if handler should bypass sandbox.
+
+        Bypass for:
+        - Safe handlers (reject - pure logic)
+        - Text handlers with tools active (v5.0) - the ReAct loop makes
+          HTTP calls to Ollama that fail inside Windows subprocess sandbox
+        """
+        if decision.handler in self._SAFE_HANDLERS:
+            return True
+
+        # v5.0: Text handlers with tools need main process for HTTP calls
+        if decision.handler in (Handler.TEXT_LOCAL, Handler.TEXT_SOCIAL, Handler.TEXT_LOGIC):
+            handler = self.handlers.get(decision.handler)
+            if handler and getattr(handler, '_tool_registry', None) is not None:
+                return True
+
+        return False
+
     def route(self, request: Request, decision: PolicyDecision) -> Response:
         """
         Route request to appropriate handler via sandbox.
 
         This is the ONLY place where handlers are called.
-        Safe handlers (reject) run directly; all others go through ProcessSandbox.
+        Safe handlers (reject) and tool-enabled text handlers run directly;
+        all others go through ProcessSandbox.
         """
         handler = self.handlers.get(decision.handler)
 
@@ -290,8 +311,8 @@ class Router:
                 )
             )
 
-        # Safe handlers bypass sandbox (pure logic, no I/O)
-        if decision.handler in self._SAFE_HANDLERS:
+        # Bypass sandbox for safe handlers and tool-enabled text handlers
+        if self._should_bypass_sandbox(decision):
             import time as _time
             _start = _time.time()
             try:

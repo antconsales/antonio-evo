@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
-import { Image, FileText, File, Download, ExternalLink, X } from 'lucide-react';
+import { Image, FileText, File, Download, ExternalLink, X, Search, Code, FolderOpen, Wrench } from 'lucide-react';
 import { useTranslation } from '../i18n';
+
+const TOOL_ICON_MAP = {
+  web_search: Search,
+  read_file: FileText,
+  write_file: FileText,
+  list_directory: FolderOpen,
+  execute_code: Code,
+  analyze_image: Image,
+};
 
 function MessageBubble({ message }) {
   const { role, content, timestamp, success, meta, attachments } = message;
@@ -143,6 +152,33 @@ function MessageBubble({ message }) {
                 </span>
               )}
             </div>
+          )}
+
+          {/* Tools used (v5.0) */}
+          {meta?.tools_used && meta.tools_used.length > 0 && !isUser && (
+            <details className="tools-used-details">
+              <summary className="tools-used-summary">
+                <Wrench size={12} />
+                {t('tools.toolsUsed') || 'Tools used'} ({meta.tools_used.length})
+              </summary>
+              <div className="tools-used-list">
+                {meta.tools_used.map((tool, idx) => {
+                  const ToolIcon = TOOL_ICON_MAP[tool.tool] || Wrench;
+                  return (
+                    <div key={idx} className={`tools-used-item ${tool.success ? '' : 'tools-used-failed'}`}>
+                      <ToolIcon size={12} />
+                      <span className="tools-used-name">{tool.tool}</span>
+                      {tool.elapsed_ms > 0 && (
+                        <span className="tools-used-time">{tool.elapsed_ms}ms</span>
+                      )}
+                      <span className={`tools-used-status ${tool.success ? 'success' : 'failed'}`}>
+                        {tool.success ? '\u2713' : '\u2717'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
           )}
         </div>
       </div>

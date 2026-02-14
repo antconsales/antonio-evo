@@ -158,6 +158,9 @@ function App() {
   const [currentPersona, setCurrentPersona] = useState(null);
   const [neuronCount, setNeuronCount] = useState(0);
 
+  // Tool actions state (v5.0)
+  const [activeToolActions, setActiveToolActions] = useState([]);
+
   // Global UI State (from /api/ui/state)
   const [uiState, setUiState] = useState(null);
   const [showRuntimeOverview, setShowRuntimeOverview] = useState(false);
@@ -210,6 +213,23 @@ function App() {
         setCurrentPersona(persona || null);
       }),
 
+      ws.on('tool_action_start', ({ tool, arguments: args }) => {
+        setActiveToolActions((prev) => [
+          ...prev,
+          { tool, arguments: args, status: 'running' },
+        ]);
+      }),
+
+      ws.on('tool_action_end', ({ tool, success, elapsedMs }) => {
+        setActiveToolActions((prev) =>
+          prev.map((a) =>
+            a.tool === tool && a.status === 'running'
+              ? { ...a, status: 'done', success, elapsedMs }
+              : a
+          )
+        );
+      }),
+
       ws.on('response', (data) => {
         const assistantMessage = {
           id: Date.now(),
@@ -222,10 +242,12 @@ function App() {
             handler: data.handler,
             persona: data.persona,
             neuron_stored: data.neuronStored,
+            tools_used: data.toolsUsed || [],
           },
         };
         setMessages((prev) => [...prev, assistantMessage]);
         setIsLoading(false);
+        setActiveToolActions([]);
 
         // Update mood
         if (data.mood) {
@@ -256,6 +278,7 @@ function App() {
         };
         setMessages((prev) => [...prev, errorMessage]);
         setIsLoading(false);
+        setActiveToolActions([]);
         setCurrentMood('error');
       }),
 
@@ -443,6 +466,7 @@ function App() {
             onSendMessage={sendMessage}
             isLoading={isLoading}
             isConnected={isConnected}
+            activeToolActions={activeToolActions}
           />
         );
     }

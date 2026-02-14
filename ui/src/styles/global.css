@@ -2867,3 +2867,159 @@ body {
 .language-select:focus {
   border-color: var(--accent-primary);
 }
+
+/* ============================================
+   Tool Actions (v5.0)
+   ============================================ */
+
+/* Container for active tool actions during loading */
+.tool-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+}
+
+/* Individual tool action */
+.tool-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  animation: toolSlideIn 0.3s ease-out;
+}
+
+.tool-action-active {
+  color: var(--accent-secondary);
+}
+
+.tool-action-done {
+  color: var(--text-muted);
+}
+
+.tool-action-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tool-action-label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tool-action-detail {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* Spinner for active tool */
+.tool-action-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg-hover);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: toolSpin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.tool-action-result {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.tool-action-result {
+  color: var(--success);
+}
+
+.tool-action-failed {
+  color: var(--error);
+}
+
+/* Tools used in message bubble */
+.tools-used-details {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.tools-used-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px 0;
+  user-select: none;
+}
+
+.tools-used-summary:hover {
+  color: var(--text-secondary);
+}
+
+.tools-used-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding-left: 4px;
+}
+
+.tools-used-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.tools-used-failed {
+  color: var(--error);
+}
+
+.tools-used-name {
+  font-weight: 500;
+}
+
+.tools-used-time {
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.tools-used-status {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.tools-used-status.success {
+  color: var(--success);
+}
+
+.tools-used-status.failed {
+  color: var(--error);
+}
+
+@keyframes toolSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toolSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

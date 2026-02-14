@@ -73,12 +73,16 @@ class PipelineExecutor:
         # Web search service (Tavily)
         self.web_search_service = web_search_service
 
-    def execute(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def execute(self, raw_input: Union[str, Dict[str, Any]], tool_callback=None) -> Dict[str, Any]:
         """
         Process a single request through the 8-step pipeline.
 
         SYNCHRONOUS. One request in, one response out.
         No async, no callbacks, no side effects beyond audit log and memory.
+
+        Args:
+            raw_input: User input (string or dict with text, attachments, etc.)
+            tool_callback: Optional callback for tool action events (v5.0)
         """
         start_time = time.time()
         memory_operation = None
@@ -128,10 +132,10 @@ class PipelineExecutor:
         if request.attachments:
             self._preprocess_attachments(request)
 
-        # === STEP 2.6: Web Search (Tavily) ===
-        # Search the web for queries that need current information
-        if self.web_search_service:
-            self._maybe_web_search(request)
+        # === STEP 2.6: Inject tool callback (v5.0) ===
+        # The ReAct loop in MistralHandler uses this to emit WebSocket events
+        if tool_callback:
+            request.metadata["_tool_callback"] = tool_callback
 
         # === STEP 3: Classify (memory-informed) ===
         classification = self.classifier.classify(request)
@@ -287,37 +291,5 @@ class PipelineExecutor:
             except Exception as e:
                 logger.warning(f"[Pipeline] Attachment preprocessing failed for {att.name}: {e}")
 
-    def _maybe_web_search(self, request) -> None:
-        """
-        Perform web search if the query would benefit from it.
-
-        Stores results in request.metadata['_web_search'] for the handler.
-        Only searches if auto_search is enabled or query matches search heuristics.
-        """
-        try:
-            ws = self.web_search_service
-            if not ws.is_available():
-                return
-
-            # Check if query needs web search
-            should_search = ws.auto_search or ws.needs_search(request.text)
-            if not should_search:
-                return
-
-            logger.info(f"[Pipeline] Web search: '{request.text[:80]}'")
-            result = ws.search(request.text)
-
-            if result.success and result.results:
-                # Store formatted context in metadata for the handler
-                request.metadata['_web_search'] = result.to_context()
-                request.metadata['_web_search_query'] = result.query
-                request.metadata['_web_search_elapsed_ms'] = result.elapsed_ms
-                logger.info(
-                    f"[Pipeline] Web search: {len(result.results)} results "
-                    f"({result.elapsed_ms}ms)"
-                )
-            elif result.error:
-                logger.warning(f"[Pipeline] Web search failed: {result.error}")
-
-        except Exception as e:
-            logger.warning(f"[Pipeline] Web search error: {e}")
+    # NOTE: _maybe_web_search() removed in v5.0
+    # Web search is now handled by the tool system (ReAct loop in MistralHandler)

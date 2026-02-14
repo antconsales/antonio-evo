@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "max_iterations": 8,
+  "tools": {
+    "web_search": {"enabled": true},
+    "read_file": {"enabled": true},
+    "write_file": {"enabled": true},
+    "list_directory": {"enabled": true},
+    "execute_code": {"enabled": true, "timeout": 30},
+    "analyze_image": {"enabled": true}
+  },
+  "file_access": {
+    "allowed_dirs": ["~"],
+    "blocked_patterns": [".env", "credentials", ".ssh", ".gnupg", "password", "token", "api_key", "secret"]
+  }
+}

@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import VoiceButton from './VoiceButton';
+import ToolActionIndicator from './ToolActionIndicator';
 import { Paperclip, Send, X, Image, FileText, File } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
-function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
+function ChatArea({ messages, onSendMessage, isLoading, isConnected, activeToolActions = [] }) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState([]);
   const messagesEndRef = useRef(null);
@@ -156,11 +157,15 @@ function ChatArea({ messages, onSendMessage, isLoading, isConnected }) {
             {isLoading && (
               <div className="message assistant loading">
                 <div className="message-content">
-                  <div className="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
+                  {activeToolActions.length > 0 ? (
+                    <ToolActionIndicator actions={activeToolActions} />
+                  ) : (
+                    <div className="typing-indicator">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

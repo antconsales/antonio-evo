@@ -26,8 +26,11 @@ class ResponseMeta:
     used_external: bool = False
     external_justification: Optional[str] = None
 
+    # Tool use tracking (v5.0)
+    tools_used: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "request_id": self.request_id,
             "handler": self.handler,
             "handler_reason": self.handler_reason,
@@ -36,8 +39,11 @@ class ResponseMeta:
             "classification": self.classification,
             "policy_decision": self.policy_decision,
             "used_external": self.used_external,
-            "external_justification": self.external_justification
+            "external_justification": self.external_justification,
         }
+        if self.tools_used:
+            d["tools_used"] = self.tools_used
+        return d
 
 
 @dataclass

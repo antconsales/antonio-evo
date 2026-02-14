@@ -166,6 +166,22 @@ export class AntonioWebSocket {
           elapsedMs: data.elapsed_ms,
           neuronStored: data.neuron_stored,
           handler: data.handler,
+          toolsUsed: data.tools_used || [],
+        });
+        break;
+
+      case 'tool_action_start':
+        this._emit('tool_action_start', {
+          tool: data.tool,
+          arguments: data.arguments || {},
+        });
+        break;
+
+      case 'tool_action_end':
+        this._emit('tool_action_end', {
+          tool: data.tool,
+          success: data.success,
+          elapsedMs: data.elapsed_ms,
         });
         break;
 

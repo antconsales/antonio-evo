@@ -238,5 +238,17 @@
     "voiceInput": "Entrada de voz",
     "voiceOutput": "Salida de voz",
     "newChat": "Nueva conversacion"
+  },
+  "tools": {
+    "searchingWeb": "Buscando en la web",
+    "readingFile": "Leyendo archivo",
+    "writingFile": "Escribiendo archivo",
+    "listingDirectory": "Listando directorio",
+    "executingCode": "Ejecutando codigo",
+    "analyzingImage": "Analizando imagen",
+    "usingTool": "Usando herramienta",
+    "toolsUsed": "Herramientas usadas",
+    "toolFailed": "Herramienta fallida",
+    "maxIterationsReached": "Iteraciones maximas alcanzadas"
   }
 }

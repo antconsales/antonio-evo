@@ -269,10 +269,11 @@ function App() {
       }),
 
       ws.on('error', ({ error }) => {
+        const errorText = typeof error === 'string' ? error : (error?.message || 'Unknown error');
         const errorMessage = {
           id: Date.now(),
           role: 'assistant',
-          content: `Error: ${error}`,
+          content: `Error: ${errorText}`,
           timestamp: new Date().toISOString(),
           success: false,
         };

@@ -50,11 +50,12 @@ export class AntonioWebSocket {
           this._scheduleReconnect();
         };
 
-        this.ws.onerror = (error) => {
-          console.error('[WS] Error:', error);
+        this.ws.onerror = (event) => {
+          console.error('[WS] Connection error');
           this.isConnecting = false;
-          this._emit('error', { error });
-          reject(error);
+          // Don't emit 'error' for connection issues - onclose handles reconnection.
+          // Only server-returned errors (from _handleMessage) should create chat messages.
+          reject(new Error('WebSocket connection failed'));
         };
 
         this.ws.onmessage = (event) => {

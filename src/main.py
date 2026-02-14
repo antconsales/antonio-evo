@@ -276,6 +276,13 @@ class Orchestrator:
         if self.memory_enabled:
             self._init_dashboard(db_path)
 
+        # Wire Safe Degradation Mode (v8.5): governance needs dashboard + audit for stress checks
+        if self.governance_engine:
+            if self.dashboard_service:
+                self.governance_engine.set_dashboard(self.dashboard_service)
+            if self.audit:
+                self.governance_engine.set_audit(self.audit)
+
         # Health Monitor (all dependencies injected)
         self.health_monitor = HealthMonitor(
             router=self.router,

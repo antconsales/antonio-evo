@@ -127,6 +127,13 @@ class GovernanceEngine:
         self._rate_lock = threading.Lock()
         self._action_timestamps: List[float] = []
 
+        # Safe Degradation Mode (v8.5)
+        self._dashboard = None
+        self._audit = None
+        self._system_mode_cache: Optional[Dict[str, Any]] = None
+        self._system_mode_cache_ts: float = 0.0
+        self._system_mode_cache_ttl: float = 60.0  # Re-check every 60s
+
         self._init_schema()
         logger.info(f"Governance Engine initialized ({len(self._tool_risk)} tool rules, "
                     f"{len(self._compiled_rules)} escalation rules)")
@@ -284,7 +291,21 @@ class GovernanceEngine:
             classification=classification,
         )
 
-        if not classification.requires_approval:
+        # Safe Degradation Mode (v8.5): override auto-approve under stress
+        system_mode = self.get_system_mode()
+        current_mode = system_mode.get("mode", "normal")
+
+        if current_mode == "read_only" and classification.level != RiskLevel.LOW:
+            # Read-only: only LOW auto-approved, everything else pending
+            decision.status = "pending"
+            classification.reasons.append(f"degradation:read_only")
+            logger.warning(f"Safe Degradation: action {action_id} held (read_only mode)")
+        elif current_mode == "conservative" and classification.level == RiskLevel.MEDIUM:
+            # Conservative: MEDIUM no longer auto-approved
+            decision.status = "pending"
+            classification.reasons.append(f"degradation:conservative")
+            logger.info(f"Safe Degradation: MEDIUM action {action_id} held (conservative mode)")
+        elif not classification.requires_approval:
             decision.status = "approved"
             decision.approved_by = "auto"
             decision.approved_at = time.time()
@@ -407,6 +428,8 @@ class GovernanceEngine:
             auto = by_status.get("executed", 0) + by_status.get("approved", 0)
             autonomy = round(auto / total, 2) if total > 0 else 0
 
+            system_mode = self.get_system_mode()
+
             return {
                 "enabled": True,
                 "version": "8.5",
@@ -415,9 +438,76 @@ class GovernanceEngine:
                 "by_risk_level": by_risk,
                 "by_status": by_status,
                 "autonomy_ratio": autonomy,
+                "system_mode": system_mode.get("mode", "normal"),
+                "system_mode_reasons": system_mode.get("reasons", []),
             }
         finally:
             cursor.close()
+
+    # ---- Safe Degradation Mode (v8.5) ----
+
+    def set_dashboard(self, dashboard) -> None:
+        """Inject DashboardService for stress-aware degradation."""
+        self._dashboard = dashboard
+
+    def set_audit(self, audit) -> None:
+        """Inject AuditLogger for integrity-aware degradation."""
+        self._audit = audit
+
+    def get_system_mode(self) -> Dict[str, Any]:
+        """
+        Determine current system operating mode based on stress indicators.
+
+        Modes:
+        - "normal": standard operation, all auto-approve rules apply
+        - "conservative": elevated caution — MEDIUM no longer auto-approved
+        - "read_only": only LOW actions auto-approved, everything else pending
+
+        Checks (cached for 60s to avoid overhead):
+        1. error_rate > 20% → conservative
+        2. pending_approvals > 5 → conservative
+        3. audit chain verification fails → read_only
+        """
+        now = time.time()
+        if self._system_mode_cache and (now - self._system_mode_cache_ts) < self._system_mode_cache_ttl:
+            return self._system_mode_cache
+
+        mode = "normal"
+        reasons = []
+
+        # 1. Check pending approvals (from own data — no external dependency)
+        try:
+            pending = self.get_pending_approvals()
+            if len(pending) > 5:
+                mode = "conservative"
+                reasons.append(f"pending_approvals={len(pending)}")
+        except Exception:
+            pass
+
+        # 2. Check error rate from dashboard
+        if self._dashboard and mode != "read_only":
+            try:
+                snapshot = self._dashboard.capture_snapshot()
+                if snapshot.total_requests_24h > 0 and snapshot.error_rate > 0.20:
+                    mode = "conservative"
+                    reasons.append(f"error_rate={snapshot.error_rate:.0%}")
+            except Exception:
+                pass
+
+        # 3. Check audit integrity (most severe → read_only)
+        if self._audit:
+            try:
+                chain_result = self._audit.verify_chain()
+                if not chain_result.valid and chain_result.entries_checked > 0:
+                    mode = "read_only"
+                    reasons.append(f"audit_chain_broken_at={chain_result.index}")
+            except Exception:
+                pass
+
+        self._system_mode_cache = {"mode": mode, "reasons": reasons, "checked_at": now}
+        self._system_mode_cache_ts = now
+        logger.debug(f"System mode: {mode} ({', '.join(reasons) if reasons else 'all clear'})")
+        return self._system_mode_cache
 
     # ---- Internal ----
 

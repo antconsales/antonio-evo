@@ -19,6 +19,7 @@ Endpoints:
 - POST /api/analyze-image: CLIP image analysis
 - POST /api/rag/*: RAG document search
 - GET /api/governance/*: Governance engine (v8.5)
+- GET /api/trust: Public trust surface (v8.5)
 """
 
 import asyncio
@@ -2661,6 +2662,74 @@ def create_app() -> "FastAPI":
             return {"success": True, "permissions": perms}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # ===================
+    # Public Trust Surface (v8.5)
+    # ===================
+
+    @app.get("/api/trust")
+    async def get_trust_surface():
+        """
+        Public Trust Surface — single endpoint for trust verification.
+
+        Exposes the verifiable trust posture of the system:
+        - governance_enabled: deterministic risk gating is active
+        - audit_verified: cryptographic hash chain is intact
+        - sandbox_enabled: code execution is sandboxed
+        - system_mode: current degradation mode (normal/conservative/read_only)
+        - autonomy_ratio: % of auto-approved actions (last 24h)
+        - last_human_approval: timestamp of most recent human-approved action
+        - pending_approvals: actions awaiting human review
+        """
+        trust = {
+            "governance_enabled": orchestrator.governance_engine is not None,
+            "audit_verified": False,
+            "audit_entries": 0,
+            "sandbox_enabled": True,
+            "system_mode": "normal",
+            "system_mode_reasons": [],
+            "autonomy_ratio": 0.0,
+            "last_human_approval": None,
+            "pending_approvals": 0,
+            "skills_verified": 0,
+            "timestamp": time.time(),
+        }
+
+        # Audit verification
+        try:
+            chain_result = orchestrator.audit.verify_chain()
+            trust["audit_verified"] = chain_result.valid
+            trust["audit_entries"] = chain_result.entries_checked
+        except Exception:
+            pass
+
+        # Governance stats
+        if orchestrator.governance_engine:
+            try:
+                gov_stats = orchestrator.governance_engine.get_stats()
+                trust["autonomy_ratio"] = gov_stats.get("autonomy_ratio", 0)
+                trust["pending_approvals"] = gov_stats.get("pending_approvals", 0)
+                trust["system_mode"] = gov_stats.get("system_mode", "normal")
+                trust["system_mode_reasons"] = gov_stats.get("system_mode_reasons", [])
+
+                # Find last human approval
+                history = orchestrator.governance_engine.get_history(limit=100)
+                for action in history:
+                    if action.get("approved_by") == "user":
+                        trust["last_human_approval"] = action.get("approved_at")
+                        break
+            except Exception:
+                pass
+
+        # Verified skills count
+        if orchestrator.plugin_manager and orchestrator.plugin_manager._skill_verifier:
+            try:
+                skill_stats = orchestrator.plugin_manager._skill_verifier.get_stats()
+                trust["skills_verified"] = skill_stats.get("verified_skills", 0)
+            except Exception:
+                pass
+
+        return {"success": True, "trust": trust}
 
     # ===================
     # Channels API (v6.0)

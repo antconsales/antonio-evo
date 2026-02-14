@@ -34,6 +34,7 @@ class ActionStep:
     result: Optional[str] = None
     timeout_secs: int = 60
     max_retries: int = 1
+    action_id: Optional[str] = None  # v8.5: governance action_id for causal chain
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -46,6 +47,7 @@ class ActionStep:
             "result": self.result[:200] if self.result else None,
             "timeout_secs": self.timeout_secs,
             "max_retries": self.max_retries,
+            "action_id": self.action_id,
         }
 
 
@@ -257,6 +259,8 @@ class WorkflowOrchestrator:
 
                     step.result = tool_result.output[:1000] if tool_result.output else ""
                     step.status = "completed" if tool_result.success else "failed"
+                    # Capture governance action_id for causal chain (v8.5)
+                    step.action_id = tool_result.metadata.get("governance_action_id")
                     if tool_result.success:
                         break  # Success — exit retry loop
                     if attempt < attempts:
@@ -499,6 +503,7 @@ class WorkflowOrchestrator:
                 result=s.get("result"),
                 timeout_secs=s.get("timeout_secs", 60),
                 max_retries=s.get("max_retries", 1),
+                action_id=s.get("action_id"),
             )
             for s in steps_data
         ]

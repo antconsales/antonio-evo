@@ -97,6 +97,10 @@ class ToolExecutor:
                         output=f"Action denied by governance policy.",
                         tool_name=tool_name,
                         error="governance_denied",
+                        metadata={
+                            "governance_action_id": action_id,
+                            "risk_level": classification.level.value,
+                        },
                     )
 
                 # Check constraints before execution
@@ -110,6 +114,10 @@ class ToolExecutor:
                         output=f"Action blocked by constraints: {reason}",
                         tool_name=tool_name,
                         error="governance_constraint",
+                        metadata={
+                            "governance_action_id": action_id,
+                            "risk_level": classification.level.value,
+                        },
                     )
 
                 logger.debug(f"Tool {tool_name}: governance APPROVED (risk={classification.level.value})")
@@ -137,6 +145,10 @@ class ToolExecutor:
             if len(result.output) > MAX_OUTPUT_CHARS:
                 result.output = result.output[:MAX_OUTPUT_CHARS] + "\n... (truncated)"
 
+            # Attach governance action_id to every result (v8.5 first-class governance)
+            if action_id:
+                result.metadata["governance_action_id"] = action_id
+
             logger.info(f"Tool {tool_name}: success={result.success}, {result.elapsed_ms}ms, output={len(result.output)} chars")
 
         except Exception as e:
@@ -147,6 +159,7 @@ class ToolExecutor:
                 tool_name=tool_name,
                 elapsed_ms=int((time.time() - start) * 1000),
                 error=str(e),
+                metadata={"governance_action_id": action_id} if action_id else {},
             )
 
         # Record execution in governance (v8.5)

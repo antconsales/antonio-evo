@@ -146,6 +146,11 @@ class MemoryRetriever:
         # 6. Build context
         elapsed_ms = int((time.time() - start_time) * 1000)
 
+        # Check for multimodal context (v8.0)
+        has_multimodal = any(
+            rn.neuron.attachment_summary for rn in relevant_neurons
+        )
+
         return MemoryContext(
             relevant_neurons=relevant_neurons,
             preferences=preferences,
@@ -154,6 +159,7 @@ class MemoryRetriever:
             avg_confidence=avg_confidence,
             dominant_mood=dominant_mood,
             has_relevant_memory=len(relevant_neurons) > 0,
+            has_multimodal_context=has_multimodal,
             memory_retrieval_ms=elapsed_ms,
         )
 
@@ -309,3 +315,35 @@ class MemoryRetriever:
             )
             for neuron, score in results
         ]
+
+    def get_bm25_results_for_hybrid(self, query: str, limit: int = 5):
+        """
+        Get BM25 results formatted for hybrid search fusion (v8.0).
+
+        Returns list of dicts with text, source, score for RRF merging.
+        """
+        clean_query = self._prepare_fts_query(query)
+        if not clean_query:
+            return []
+
+        try:
+            results = self.storage.search_bm25(
+                query=clean_query,
+                limit=limit,
+                min_confidence=self.min_confidence,
+            )
+            return [
+                {
+                    "text": neuron.output[:200],
+                    "source": f"memory:{neuron.id}",
+                    "score": score,
+                    "metadata": {
+                        "neuron_id": neuron.id,
+                        "input": neuron.input[:100],
+                        "confidence": neuron.confidence,
+                    },
+                }
+                for neuron, score in results
+            ]
+        except Exception:
+            return []

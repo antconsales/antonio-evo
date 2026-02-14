@@ -49,7 +49,7 @@ class DocumentLoader:
     Supports MD and TXT files with configurable chunking.
     """
 
-    SUPPORTED_EXTENSIONS = {".md", ".txt", ".markdown"}
+    SUPPORTED_EXTENSIONS = {".md", ".txt", ".markdown", ".csv", ".json"}
 
     def __init__(
         self,
@@ -134,10 +134,10 @@ class DocumentLoader:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # Extract metadata for markdown files
-            metadata = {}
+            # Extract metadata (v8.0 enhanced)
+            metadata = self._extract_common_metadata(content)
             if file_path.suffix.lower() in {".md", ".markdown"}:
-                metadata = self._extract_markdown_metadata(content)
+                metadata.update(self._extract_markdown_metadata(content))
 
             return Document(
                 content=content,
@@ -150,6 +150,29 @@ class DocumentLoader:
         except Exception as e:
             logger.error(f"Failed to load {path}: {e}")
             return None
+
+    def _extract_common_metadata(self, content: str) -> dict:
+        """Extract common metadata from any document (v8.0)."""
+        metadata = {}
+        metadata["word_count"] = len(content.split())
+        metadata["char_count"] = len(content)
+
+        # Detect code blocks
+        code_blocks = re.findall(r"```[\s\S]*?```", content)
+        metadata["code_block_count"] = len(code_blocks)
+
+        # Count links
+        links = re.findall(r"https?://\S+", content)
+        metadata["link_count"] = len(links)
+
+        # Simple language hint (check for common words)
+        lower = content.lower()[:500]
+        if any(w in lower for w in ["il ", "la ", "che ", "di ", "per "]):
+            metadata["language_hint"] = "it"
+        elif any(w in lower for w in ["the ", "is ", "and ", "for ", "with "]):
+            metadata["language_hint"] = "en"
+
+        return metadata
 
     def _extract_markdown_metadata(self, content: str) -> dict:
         """Extract metadata from markdown content."""

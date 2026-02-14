@@ -806,6 +806,11 @@ class ProactiveService:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._insight_callbacks: List[Callable[[ProactiveInsight], None]] = []
+        self._workflow_orchestrator = None
+
+    def set_workflow_orchestrator(self, orchestrator) -> None:
+        """Inject WorkflowOrchestrator for scheduled task execution (v8.0)."""
+        self._workflow_orchestrator = orchestrator
 
     def register_insight_callback(self, callback: Callable[[ProactiveInsight], None]):
         """Register callback for new insights."""
@@ -852,6 +857,15 @@ class ProactiveService:
 
             except Exception as e:
                 logger.error(f"Proactive analysis error: {e}")
+
+            # v8.0: Run workflow scheduler tick
+            if self._workflow_orchestrator:
+                try:
+                    executed = self._workflow_orchestrator.run_scheduler_tick()
+                    if executed:
+                        logger.info(f"Scheduler executed {len(executed)} task(s)")
+                except Exception as e:
+                    logger.debug(f"Scheduler tick error: {e}")
 
             # Wait for next analysis
             self._stop_event.wait(self.analysis_interval)

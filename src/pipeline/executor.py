@@ -79,6 +79,12 @@ class PipelineExecutor:
         self.rag_client = rag_client
         self.rag_config = rag_config or {}
 
+        # Knowledge Graph (v8.0)
+        self.knowledge_graph = None
+
+        # Self-Improvement Engine (v8.0)
+        self.self_improvement = None
+
         # Hook registry (v6.0 plugin system)
         self.hook_registry = None
 
@@ -136,14 +142,32 @@ class PipelineExecutor:
             except Exception:
                 request.emotional_context = None
 
-        # === STEP 2.2: Knowledge Context (v7.0 RAG auto-enrichment) ===
+        # === STEP 2.2: Knowledge Context (v7.0 RAG auto-enrichment, v8.0 hybrid search) ===
         if (self.rag_client and self.rag_client.is_available()
                 and self.rag_config.get("auto_enrich", False)):
             try:
-                results = self.rag_client.search(
-                    query=request.text,
-                    limit=self.rag_config.get("top_k", 3),
-                )
+                # v8.0: Use hybrid search if memory BM25 results available
+                bm25_for_hybrid = None
+                if self.memory_enabled and self.memory_retriever:
+                    try:
+                        bm25_for_hybrid = self.memory_retriever.get_bm25_results_for_hybrid(
+                            request.text, limit=5
+                        )
+                    except Exception:
+                        pass
+
+                if bm25_for_hybrid and hasattr(self.rag_client, 'hybrid_search'):
+                    results = self.rag_client.hybrid_search(
+                        query=request.text,
+                        bm25_results=bm25_for_hybrid,
+                        limit=self.rag_config.get("top_k", 3),
+                    )
+                else:
+                    results = self.rag_client.search(
+                        query=request.text,
+                        limit=self.rag_config.get("top_k", 3),
+                    )
+
                 score_threshold = self.rag_config.get("score_threshold", 0.3)
                 filtered = [r for r in results if r.score >= score_threshold]
                 if filtered:
@@ -157,9 +181,18 @@ class PipelineExecutor:
                         parts.append(chunk)
                         total += len(chunk)
                     request.knowledge_context = "\n---\n".join(parts)
-                    logger.debug(f"RAG enrichment: {len(filtered)} docs, {total} chars")
+                    logger.debug(f"RAG enrichment: {len(filtered)} docs, {total} chars (hybrid={'yes' if bm25_for_hybrid else 'no'})")
             except Exception:
                 request.knowledge_context = None
+
+        # === STEP 2.3: Knowledge Graph Context (v8.0) ===
+        if self.knowledge_graph:
+            try:
+                kg_context = self.knowledge_graph.get_entity_context(request.text)
+                if kg_context:
+                    request.metadata["_kg_context"] = kg_context
+            except Exception:
+                pass
 
         # === STEP 2.5: Preprocess Image Attachments ===
         # Analyze images BEFORE routing to avoid sandbox subprocess issues
@@ -268,6 +301,27 @@ class PipelineExecutor:
         if self.digital_twin:
             try:
                 self.digital_twin.learn_from_message(request.text)
+            except Exception:
+                pass
+
+        # === STEP 7.4: Knowledge Graph Extraction (v8.0) ===
+        if self.knowledge_graph:
+            try:
+                output_text = response.get("output") or response.get("text", "")
+                neuron_id = neuron.id if neuron else None
+                self.knowledge_graph.process_interaction(
+                    request.text, str(output_text)[:2000], neuron_id=neuron_id
+                )
+            except Exception:
+                pass
+
+        # === STEP 7.5: Self-Improvement Signal Detection (v8.0) ===
+        if self.self_improvement:
+            try:
+                self.self_improvement.detect_implicit_signal(
+                    current_msg=request.text,
+                    session_id=request.session_id,
+                )
             except Exception:
                 pass
 

@@ -233,6 +233,17 @@ class NeuronCreator:
         # Get output text
         output = response.get("output") or response.get("text", "")
 
+        # Extract multimodal attachment summaries (v8.0)
+        attachment_summary = None
+        if hasattr(request, "attachments") and request.attachments:
+            summaries = []
+            for att in request.attachments:
+                desc = getattr(att, "description", None)
+                if desc:
+                    summaries.append(desc)
+            if summaries:
+                attachment_summary = " | ".join(summaries)
+
         # Create neuron
         neuron_create = NeuronCreate(
             input=request.text,
@@ -244,6 +255,7 @@ class NeuronCreator:
             session_id=request.session_id,
             request_id=request.request_id,
             classification_domain=classification.domain,
+            attachment_summary=attachment_summary,
         )
 
         # Store and return

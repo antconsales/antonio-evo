@@ -38,6 +38,9 @@ class SoulEngine:
         # Optional injected services
         self._personality_engine = None
         self._emotional_memory = None
+        self._self_improvement = None
+        self._prompt_library = None
+        self._last_template_id = None  # Track for performance recording
 
         # Load soul definition
         self._soul_text = self._load_soul()
@@ -50,6 +53,14 @@ class SoulEngine:
     def set_emotional_memory(self, memory) -> None:
         """Inject EmotionalMemory for tone adaptation."""
         self._emotional_memory = memory
+
+    def set_self_improvement(self, engine) -> None:
+        """Inject SelfImprovementEngine for applied improvements (v8.0)."""
+        self._self_improvement = engine
+
+    def set_prompt_library(self, library) -> None:
+        """Inject PromptLibrary for versioned templates (v8.0)."""
+        self._prompt_library = library
 
     def _load_soul(self) -> str:
         """Load soul definition from markdown file."""
@@ -75,21 +86,29 @@ class SoulEngine:
             session_id: Current session for emotional lookup
         """
         parts = [self._soul_text]
+        self._last_template_id = None
 
-        # Persona-specific behavior
+        # Persona-specific behavior (v8.0: use PromptLibrary templates when available)
+        persona_text = None
+        if self._prompt_library:
+            try:
+                tpl_name = "logic_system" if persona == "LOGIC" else "social_system"
+                tpl = self._prompt_library.get_template(tpl_name, category="persona")
+                if tpl:
+                    persona_text = tpl.template
+                    self._last_template_id = tpl.id
+            except Exception as e:
+                logger.debug(f"PromptLibrary lookup failed: {e}")
+
         if persona == "LOGIC":
             parts.append(
-                "\n\n## Modalità Corrente: LOGIC\n"
-                "In questa conversazione, usa uno stile analitico e preciso. "
-                "Struttura le risposte con chiarezza. Usa dati e fatti. "
-                "Mantieni un tono professionale ma accessibile."
+                f"\n\n## Modalità Corrente: LOGIC\n"
+                f"{persona_text or 'In questa conversazione, usa uno stile analitico e preciso. Struttura le risposte con chiarezza. Usa dati e fatti. Mantieni un tono professionale ma accessibile.'}"
             )
         else:
             parts.append(
-                "\n\n## Modalità Corrente: SOCIAL\n"
-                "In questa conversazione, usa uno stile amichevole e naturale. "
-                "Rispondi come un amico esperto. Sii diretto e conciso. "
-                "Non analizzare troppo — rispondi alla domanda."
+                f"\n\n## Modalità Corrente: SOCIAL\n"
+                f"{persona_text or 'In questa conversazione, usa uno stile amichevole e naturale. Rispondi come un amico esperto. Sii diretto e conciso. Non analizzare troppo — rispondi alla domanda.'}"
             )
 
         # Personality trait adaptation
@@ -111,6 +130,18 @@ class SoulEngine:
                     parts.append(f"\n\n## Adattamento Emotivo\n{tone_instruction}")
             except Exception as e:
                 logger.debug(f"Emotional adaptation skipped: {e}")
+
+        # Applied improvements from Self-Improvement Engine (v8.0)
+        if self._self_improvement:
+            try:
+                improvements = self._self_improvement.get_active_improvements()
+                if improvements:
+                    imp_lines = [f"- {imp.suggestion}" for imp in improvements[:5]]
+                    parts.append(
+                        "\n\n## Miglioramenti Applicati\n" + "\n".join(imp_lines)
+                    )
+            except Exception as e:
+                logger.debug(f"Self-improvement injection skipped: {e}")
 
         return "\n".join(parts)
 
@@ -171,6 +202,10 @@ class SoulEngine:
 
         return ""
 
+    def get_last_template_id(self) -> Optional[int]:
+        """Return the template ID used in the last get_system_prompt() call."""
+        return self._last_template_id
+
     def get_identity(self) -> Dict[str, Any]:
         """Return identity info for API responses."""
         return {
@@ -179,4 +214,5 @@ class SoulEngine:
             "soul_loaded": bool(self._soul_text),
             "personality_adaptation": self.enable_personality and self._personality_engine is not None,
             "emotional_adaptation": self.enable_emotional and self._emotional_memory is not None,
+            "prompt_library": self._prompt_library is not None,
         }

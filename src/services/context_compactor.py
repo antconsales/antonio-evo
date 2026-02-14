@@ -138,6 +138,25 @@ class ContextCompactor:
 
         return result
 
+    def score_context_relevance(self, chunks: List[str], query: str) -> List[float]:
+        """
+        Score context chunks by relevance to query (v8.0).
+
+        Simple word-overlap scoring for ranking before compaction.
+        Returns list of scores (0.0-1.0) aligned with chunks.
+        """
+        query_words = set(query.lower().split())
+        if not query_words:
+            return [0.5] * len(chunks)
+
+        scores = []
+        for chunk in chunks:
+            chunk_words = set(chunk.lower().split())
+            overlap = len(query_words & chunk_words)
+            score = min(1.0, overlap / max(len(query_words), 1))
+            scores.append(score)
+        return scores
+
     def _aggressive_truncate(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Level 3: Keep only system + last few messages."""
         system_msg = messages[0] if messages[0].get("role") == "system" else None

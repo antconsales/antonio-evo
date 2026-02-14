@@ -34,7 +34,7 @@ class MemoryStorage:
     """
 
     # Schema version for migrations
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: str = "data/evomemory.db"):
         """
@@ -51,6 +51,7 @@ class MemoryStorage:
 
         # Initialize schema
         self._init_schema()
+        self._run_migrations()
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
@@ -189,6 +190,63 @@ class MemoryStorage:
                 VALUES ('version', ?)
             """, (str(self.SCHEMA_VERSION),))
 
+    def _run_migrations(self):
+        """Run schema migrations for v2+ (multimodal memory)."""
+        with self._cursor() as cursor:
+            # v2: Add attachment_summary column
+            try:
+                cursor.execute(
+                    "ALTER TABLE neurons ADD COLUMN attachment_summary TEXT"
+                )
+            except Exception:
+                pass  # Column already exists
+
+            # Rebuild FTS to include attachment_summary
+            # Drop old triggers and FTS table, recreate with new column
+            cursor.execute("DROP TRIGGER IF EXISTS neurons_ai")
+            cursor.execute("DROP TRIGGER IF EXISTS neurons_ad")
+            cursor.execute("DROP TRIGGER IF EXISTS neurons_au")
+            cursor.execute("DROP TABLE IF EXISTS neurons_fts")
+
+            cursor.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS neurons_fts USING fts5(
+                    input,
+                    output,
+                    attachment_summary,
+                    content='neurons',
+                    content_rowid='rowid'
+                )
+            """)
+
+            # Rebuild FTS index from existing data
+            cursor.execute("""
+                INSERT INTO neurons_fts(rowid, input, output, attachment_summary)
+                SELECT rowid, input, output, COALESCE(attachment_summary, '')
+                FROM neurons
+            """)
+
+            # Recreate triggers with attachment_summary
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS neurons_ai AFTER INSERT ON neurons BEGIN
+                    INSERT INTO neurons_fts(rowid, input, output, attachment_summary)
+                    VALUES (NEW.rowid, NEW.input, NEW.output, COALESCE(NEW.attachment_summary, ''));
+                END
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS neurons_ad AFTER DELETE ON neurons BEGIN
+                    INSERT INTO neurons_fts(neurons_fts, rowid, input, output, attachment_summary)
+                    VALUES ('delete', OLD.rowid, OLD.input, OLD.output, COALESCE(OLD.attachment_summary, ''));
+                END
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS neurons_au AFTER UPDATE ON neurons BEGIN
+                    INSERT INTO neurons_fts(neurons_fts, rowid, input, output, attachment_summary)
+                    VALUES ('delete', OLD.rowid, OLD.input, OLD.output, COALESCE(OLD.attachment_summary, ''));
+                    INSERT INTO neurons_fts(rowid, input, output, attachment_summary)
+                    VALUES (NEW.rowid, NEW.input, NEW.output, COALESCE(NEW.attachment_summary, ''));
+                END
+            """)
+
     # ===================
     # NEURON OPERATIONS
     # ===================
@@ -211,8 +269,8 @@ class MemoryStorage:
                     id, input, input_hash, output, confidence, mood,
                     handler, persona, created_at, updated_at,
                     access_count, last_accessed, session_id,
-                    request_id, classification_domain
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    request_id, classification_domain, attachment_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 neuron.id,
                 neuron.input,
@@ -229,6 +287,7 @@ class MemoryStorage:
                 neuron.session_id,
                 neuron.request_id,
                 neuron.classification_domain,
+                neuron.attachment_summary,
             ))
 
         return neuron
@@ -668,6 +727,7 @@ class MemoryStorage:
             session_id=row["session_id"],
             request_id=row["request_id"],
             classification_domain=row["classification_domain"],
+            attachment_summary=row["attachment_summary"] if "attachment_summary" in row.keys() else None,
         )
 
     def close(self):

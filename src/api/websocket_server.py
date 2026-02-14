@@ -1423,6 +1423,298 @@ def create_app() -> "FastAPI":
             return {"success": False, "error": str(e)}
 
     # ===================
+    # Knowledge Graph (v8.0)
+    # ===================
+
+    @app.get("/api/knowledge-graph/stats")
+    async def kg_stats():
+        """Get knowledge graph statistics."""
+        if not orchestrator.knowledge_graph:
+            return {"enabled": False, "error": "Knowledge graph not initialized"}
+        try:
+            return orchestrator.knowledge_graph.get_stats()
+        except Exception as e:
+            return {"enabled": False, "error": str(e)}
+
+    @app.get("/api/knowledge-graph/entities")
+    async def kg_entities(entity_type: Optional[str] = None, limit: int = 50):
+        """Get entities from the knowledge graph."""
+        if not orchestrator.knowledge_graph:
+            return {"success": False, "error": "Knowledge graph not initialized"}
+        try:
+            entities = orchestrator.knowledge_graph.get_entities(entity_type=entity_type, limit=limit)
+            return {"success": True, "entities": entities}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    class KGSearchRequest(BaseModel):
+        """Knowledge graph search request."""
+        query: str
+        entity_type: Optional[str] = None
+        limit: int = 20
+
+    @app.post("/api/knowledge-graph/search")
+    async def kg_search(request: KGSearchRequest):
+        """Search the knowledge graph."""
+        if not orchestrator.knowledge_graph:
+            return {"success": False, "error": "Knowledge graph not initialized"}
+        try:
+            results = orchestrator.knowledge_graph.search_entities(
+                request.query, entity_type=request.entity_type, limit=request.limit
+            )
+            return {"success": True, "results": results}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ===================
+    # Self-Improvement (v8.0)
+    # ===================
+
+    class FeedbackRequest(BaseModel):
+        """Explicit feedback request."""
+        neuron_id: Optional[str] = None
+        feedback: str  # "positive" or "negative"
+        session_id: Optional[str] = None
+
+    @app.post("/api/feedback")
+    async def submit_feedback(request: FeedbackRequest):
+        """Submit explicit feedback for a response."""
+        if not orchestrator.self_improvement:
+            return {"success": False, "error": "Self-improvement not initialized"}
+        try:
+            orchestrator.self_improvement.record_explicit_feedback(
+                neuron_id=request.neuron_id,
+                feedback=request.feedback,
+                session_id=request.session_id,
+            )
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/self-improvement/stats")
+    async def si_stats():
+        """Get self-improvement statistics."""
+        if not orchestrator.self_improvement:
+            return {"enabled": False, "error": "Self-improvement not initialized"}
+        try:
+            return orchestrator.self_improvement.get_stats()
+        except Exception as e:
+            return {"enabled": False, "error": str(e)}
+
+    @app.get("/api/self-improvement/suggestions")
+    async def si_suggestions():
+        """Get pending improvement suggestions."""
+        if not orchestrator.self_improvement:
+            return {"success": False, "error": "Self-improvement not initialized"}
+        try:
+            pending = orchestrator.self_improvement.get_pending_improvements()
+            return {"success": True, "suggestions": [s.to_dict() for s in pending]}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/self-improvement/apply/{improvement_id}")
+    async def si_apply(improvement_id: int):
+        """Apply an improvement suggestion."""
+        if not orchestrator.self_improvement:
+            return {"success": False, "error": "Self-improvement not initialized"}
+        try:
+            ok = orchestrator.self_improvement.apply_improvement(improvement_id)
+            return {"success": ok}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/self-improvement/reject/{improvement_id}")
+    async def si_reject(improvement_id: int):
+        """Reject an improvement suggestion."""
+        if not orchestrator.self_improvement:
+            return {"success": False, "error": "Self-improvement not initialized"}
+        try:
+            ok = orchestrator.self_improvement.reject_improvement(improvement_id)
+            return {"success": ok}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/self-improvement/generate")
+    async def si_generate():
+        """Generate new improvement suggestions from failure analysis."""
+        if not orchestrator.self_improvement:
+            return {"success": False, "error": "Self-improvement not initialized"}
+        try:
+            loop = asyncio.get_event_loop()
+            improvements = await loop.run_in_executor(
+                None, orchestrator.self_improvement.generate_improvements
+            )
+            return {"success": True, "improvements": [i.to_dict() for i in improvements]}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ===================
+    # Workflow Orchestration (v8.0)
+    # ===================
+
+    @app.get("/api/workflows")
+    async def wf_list(status: Optional[str] = None, limit: int = 20):
+        """List action plans."""
+        if not orchestrator.workflow_orchestrator:
+            return {"success": False, "error": "Workflow not initialized"}
+        try:
+            plans = orchestrator.workflow_orchestrator.list_plans(status=status, limit=limit)
+            return {"success": True, "plans": [p.to_dict() for p in plans]}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/workflows/{plan_id}")
+    async def wf_get(plan_id: str):
+        """Get a specific action plan."""
+        if not orchestrator.workflow_orchestrator:
+            return {"success": False, "error": "Workflow not initialized"}
+        try:
+            plan = orchestrator.workflow_orchestrator.get_plan(plan_id)
+            if plan:
+                return {"success": True, "plan": plan.to_dict()}
+            return {"success": False, "error": "Plan not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/workflows/{plan_id}/approve")
+    async def wf_approve(plan_id: str):
+        """Approve a draft plan for execution."""
+        if not orchestrator.workflow_orchestrator:
+            return {"success": False, "error": "Workflow not initialized"}
+        try:
+            ok = orchestrator.workflow_orchestrator.approve_plan(plan_id)
+            return {"success": ok}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/workflows/{plan_id}/execute")
+    async def wf_execute(plan_id: str):
+        """Execute an approved plan."""
+        if not orchestrator.workflow_orchestrator:
+            return {"success": False, "error": "Workflow not initialized"}
+        try:
+            loop = asyncio.get_event_loop()
+            plan = await loop.run_in_executor(
+                None, orchestrator.workflow_orchestrator.execute_plan, plan_id
+            )
+            return {"success": True, "plan": plan.to_dict()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/schedules")
+    async def sched_list():
+        """List scheduled tasks."""
+        if not orchestrator.workflow_orchestrator:
+            return {"success": False, "error": "Workflow not initialized"}
+        try:
+            schedules = orchestrator.workflow_orchestrator.get_schedules()
+            return {"success": True, "schedules": schedules}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    class ScheduleCreateRequest(BaseModel):
+        """Schedule creation request."""
+        name: str
+        cron_expression: str
+        tool_name: str
+        tool_arguments: Dict[str, Any] = {}
+
+    @app.post("/api/schedules")
+    async def sched_create(request: ScheduleCreateRequest):
+        """Create a scheduled task."""
+        if not orchestrator.workflow_orchestrator:
+            return {"success": False, "error": "Workflow not initialized"}
+        try:
+            result = orchestrator.workflow_orchestrator.schedule_task(
+                name=request.name,
+                cron_expression=request.cron_expression,
+                tool_name=request.tool_name,
+                tool_arguments=request.tool_arguments,
+            )
+            return {"success": True, "schedule": result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.delete("/api/schedules/{task_id}")
+    async def sched_delete(task_id: int):
+        """Delete a scheduled task."""
+        if not orchestrator.workflow_orchestrator:
+            return {"success": False, "error": "Workflow not initialized"}
+        try:
+            ok = orchestrator.workflow_orchestrator.delete_schedule(task_id)
+            return {"success": ok}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ===================
+    # Prompt Library (v8.0)
+    # ===================
+
+    @app.get("/api/prompts")
+    async def prompts_list(category: Optional[str] = None):
+        """Get all prompt templates."""
+        if not orchestrator.prompt_library:
+            return {"success": False, "error": "Prompt library not initialized"}
+        try:
+            templates = orchestrator.prompt_library.get_all_templates(category=category)
+            return {"success": True, "templates": [t.to_dict() for t in templates]}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/prompts/{name}")
+    async def prompts_get(name: str):
+        """Get a prompt template by name."""
+        if not orchestrator.prompt_library:
+            return {"success": False, "error": "Prompt library not initialized"}
+        try:
+            t = orchestrator.prompt_library.get_template(name)
+            if t:
+                return {"success": True, "template": t.to_dict()}
+            return {"success": False, "error": "Template not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    class PromptUpdateRequest(BaseModel):
+        """Prompt template update request."""
+        template: str
+
+    @app.put("/api/prompts/{name}")
+    async def prompts_update(name: str, request: PromptUpdateRequest):
+        """Update a prompt template (creates new version)."""
+        if not orchestrator.prompt_library:
+            return {"success": False, "error": "Prompt library not initialized"}
+        try:
+            t = orchestrator.prompt_library.update_template(name, request.template)
+            if t:
+                return {"success": True, "template": t.to_dict()}
+            return {"success": False, "error": "Template not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/prompts/{name}/rollback")
+    async def prompts_rollback(name: str):
+        """Rollback a prompt template to previous version."""
+        if not orchestrator.prompt_library:
+            return {"success": False, "error": "Prompt library not initialized"}
+        try:
+            t = orchestrator.prompt_library.rollback_template(name)
+            if t:
+                return {"success": True, "template": t.to_dict()}
+            return {"success": False, "error": "No previous version available"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/prompts/performance/stats")
+    async def prompts_performance():
+        """Get prompt library performance stats."""
+        if not orchestrator.prompt_library:
+            return {"success": False, "error": "Prompt library not initialized"}
+        try:
+            return orchestrator.prompt_library.get_stats()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ===================
     # Runtime Profiles
     # ===================
 

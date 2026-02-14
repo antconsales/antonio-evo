@@ -163,6 +163,19 @@ class Orchestrator:
             else:
                 logger.info("Digital Twin (v3.0) disabled by profile")
 
+        # Knowledge Graph (v8.0)
+        self.knowledge_graph = None
+        # Self-Improvement Engine (v8.0)
+        self.self_improvement = None
+        # Prompt Library (v8.0)
+        self.prompt_library = None
+        # Workflow Orchestrator (v8.0)
+        self.workflow_orchestrator = None
+        if self.memory_enabled:
+            self._init_knowledge_graph(db_path)
+            self._init_self_improvement(db_path)
+            self._init_prompt_library(db_path)
+
         # RAG components (v7.0 - config/rag.json, local file-based mode by default)
         self.rag = None
         self._rag_config = {}
@@ -237,6 +250,20 @@ class Orchestrator:
         if self.hook_registry:
             self.pipeline.hook_registry = self.hook_registry
 
+        # Inject Knowledge Graph into pipeline (v8.0)
+        if self.knowledge_graph:
+            self.pipeline.knowledge_graph = self.knowledge_graph
+
+        # Inject Self-Improvement into pipeline and soul (v8.0)
+        if self.self_improvement:
+            self.pipeline.self_improvement = self.self_improvement
+            if self.soul_engine:
+                self.soul_engine.set_self_improvement(self.self_improvement)
+
+        # Inject Workflow Orchestrator into ProactiveService for scheduled tasks (v8.0)
+        if self.workflow_orchestrator and self.proactive_service:
+            self.proactive_service.set_workflow_orchestrator(self.workflow_orchestrator)
+
         # Health Monitor (all dependencies injected)
         self.health_monitor = HealthMonitor(
             router=self.router,
@@ -252,6 +279,57 @@ class Orchestrator:
             digital_twin=self.digital_twin,
             llm_manager=self.llm_manager,
         )
+
+    def _init_knowledge_graph(self, db_path: str) -> None:
+        """Initialize Knowledge Graph Service (v8.0)."""
+        try:
+            from .services.knowledge_graph import KnowledgeGraphService
+            self.knowledge_graph = KnowledgeGraphService(
+                db_path=db_path,
+                ollama_url=self.service_config.llm_server,
+                model=self.service_config.ollama_model,
+            )
+            logger.info("Knowledge Graph (v8.0) initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Knowledge Graph: {e}")
+            self.knowledge_graph = None
+
+    def _init_self_improvement(self, db_path: str) -> None:
+        """Initialize Self-Improvement Engine (v8.0)."""
+        try:
+            from .services.self_improvement import SelfImprovementEngine
+            self.self_improvement = SelfImprovementEngine(
+                db_path=db_path,
+                ollama_url=self.service_config.llm_server,
+                model=self.service_config.ollama_model,
+            )
+            logger.info("Self-Improvement Engine (v8.0) initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Self-Improvement: {e}")
+            self.self_improvement = None
+
+    def _init_prompt_library(self, db_path: str) -> None:
+        """Initialize Prompt Library (v8.0)."""
+        try:
+            from .services.prompt_library import PromptLibrary
+            self.prompt_library = PromptLibrary(db_path=db_path)
+            logger.info("Prompt Library (v8.0) initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Prompt Library: {e}")
+            self.prompt_library = None
+
+    def _init_workflow(self) -> None:
+        """Initialize Workflow Orchestrator (v8.0). Called after tool system."""
+        try:
+            from .services.workflow import WorkflowOrchestrator
+            self.workflow_orchestrator = WorkflowOrchestrator(
+                db_path="data/evomemory.db",
+                tool_executor=self.tool_executor,
+            )
+            logger.info("Workflow Orchestrator (v8.0) initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Workflow: {e}")
+            self.workflow_orchestrator = None
 
     def _init_warmup(self) -> None:
         """Initialize Ollama warm-up service."""
@@ -357,6 +435,9 @@ class Orchestrator:
                 self.soul_engine.set_personality_engine(self.personality_engine)
             if self.emotional_memory:
                 self.soul_engine.set_emotional_memory(self.emotional_memory)
+            # v8.0: Connect Prompt Library for versioned templates
+            if self.prompt_library:
+                self.soul_engine.set_prompt_library(self.prompt_library)
 
             # Inject into text handlers
             from .models.policy import Handler
@@ -514,8 +595,21 @@ class Orchestrator:
                 from .tools.knowledge_search import DEFINITION as ks_def, create_handler as ks_handler
                 self._register_tool(registry, ks_def, ks_handler(self.rag))
 
+            # Knowledge Graph tool (v8.0)
+            if self.knowledge_graph:
+                from .tools.knowledge_graph import DEFINITION as kg_def, create_handler as kg_handler
+                self._register_tool(registry, kg_def, kg_handler(self.knowledge_graph))
+
             self.tool_registry = registry
             self.tool_executor = ToolExecutor(registry)
+
+            # Initialize Workflow Orchestrator (v8.0 — needs tool_executor)
+            self._init_workflow()
+
+            # Register action_plan tool (v8.0 — needs workflow_orchestrator)
+            if self.workflow_orchestrator:
+                from .tools.action_plan import DEFINITION as ap_def, create_handler as ap_handler
+                self._register_tool(registry, ap_def, ap_handler(self.workflow_orchestrator))
 
             # Inject tools into text handlers
             self._inject_tools_into_handlers()
@@ -541,6 +635,11 @@ class Orchestrator:
             # v6.0: Inject LLM Manager for multi-provider failover
             if handler and hasattr(handler, 'set_llm_manager') and self.llm_manager:
                 handler.set_llm_manager(self.llm_manager)
+            # v8.0: Inject Prompt Library and Memory Storage for few-shot examples
+            if handler and hasattr(handler, 'set_prompt_library') and self.prompt_library:
+                handler.set_prompt_library(self.prompt_library)
+            if handler and hasattr(handler, 'set_memory_storage') and self.memory_storage:
+                handler.set_memory_storage(self.memory_storage)
 
     def _init_web_search(self):
         """Initialize Tavily Web Search Service."""

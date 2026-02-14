@@ -70,6 +70,9 @@ class MistralHandler(BaseHandler):
         self._llm_manager = None
         # Context Compactor (v6.0 - injected by Orchestrator)
         self._context_compactor = None
+        # Prompt Library + Memory Storage (v8.0 - for few-shot examples)
+        self._prompt_library = None
+        self._memory_storage = None
 
     def set_document_parser(self, parser):
         """Inject document parser service for image/PDF OCR."""
@@ -98,6 +101,14 @@ class MistralHandler(BaseHandler):
     def set_context_compactor(self, compactor):
         """Inject Context Compactor for long conversation handling (v6.0)."""
         self._context_compactor = compactor
+
+    def set_prompt_library(self, library):
+        """Inject Prompt Library for few-shot examples (v8.0)."""
+        self._prompt_library = library
+
+    def set_memory_storage(self, storage):
+        """Inject Memory Storage for few-shot example retrieval (v8.0)."""
+        self._memory_storage = storage
 
     def _load_system_prompt(self) -> str:
         """Load system prompt from configured file."""
@@ -550,7 +561,33 @@ class MistralHandler(BaseHandler):
                 f"--- END KNOWLEDGE ---\n"
             )
 
-        extra_context = attachment_context + web_context + knowledge_context
+        # Add knowledge graph context if available (v8.0)
+        kg_context = ""
+        if metadata and '_kg_context' in metadata:
+            kg_context = (
+                f"\n\n--- KNOWLEDGE GRAPH ---\n"
+                f"{metadata['_kg_context']}\n"
+                f"--- END KNOWLEDGE GRAPH ---\n"
+            )
+
+        # Few-shot examples from high-confidence memory neurons (v8.0)
+        few_shot_context = ""
+        if self._prompt_library and self._memory_storage and task_type in ("chat", None, ""):
+            try:
+                examples = self._prompt_library.get_few_shot_examples(
+                    query=user_message, limit=2, memory_storage=self._memory_storage
+                )
+                if examples:
+                    lines = ["\n\n--- EXAMPLES ---"]
+                    for ex in examples:
+                        lines.append(f"User: {ex['user']}")
+                        lines.append(f"Assistant: {ex['assistant']}")
+                    lines.append("--- END EXAMPLES ---")
+                    few_shot_context = "\n".join(lines)
+            except Exception:
+                pass
+
+        extra_context = attachment_context + web_context + knowledge_context + kg_context + few_shot_context
 
         if task_type == "classify":
             return f"""TASK: CLASSIFY

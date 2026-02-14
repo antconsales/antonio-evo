@@ -79,6 +79,9 @@ class Neuron:
     request_id: Optional[str] = None
     classification_domain: Optional[str] = None
 
+    # Multimodal context (v8.0)
+    attachment_summary: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -99,6 +102,7 @@ class Neuron:
             "session_id": self.session_id,
             "request_id": self.request_id,
             "classification_domain": self.classification_domain,
+            "attachment_summary": self.attachment_summary,
         }
 
     @classmethod
@@ -122,6 +126,7 @@ class Neuron:
             session_id=data.get("session_id"),
             request_id=data.get("request_id"),
             classification_domain=data.get("classification_domain"),
+            attachment_summary=data.get("attachment_summary"),
         )
 
     def get_effective_confidence(self, current_time: Optional[float] = None) -> float:
@@ -191,6 +196,7 @@ class NeuronCreate:
     session_id: Optional[str] = None
     request_id: Optional[str] = None
     classification_domain: Optional[str] = None
+    attachment_summary: Optional[str] = None  # Multimodal context (v8.0)
 
     def to_neuron(self) -> Neuron:
         """Convert to full Neuron with generated fields."""
@@ -220,6 +226,7 @@ class NeuronCreate:
             session_id=self.session_id,
             request_id=self.request_id,
             classification_domain=self.classification_domain,
+            attachment_summary=self.attachment_summary,
         )
 
 
@@ -298,6 +305,7 @@ class MemoryContext:
 
     # Flags for pipeline
     has_relevant_memory: bool = False
+    has_multimodal_context: bool = False  # v8.0: neurons with attachment summaries
     memory_retrieval_ms: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -310,6 +318,7 @@ class MemoryContext:
             "avg_confidence": self.avg_confidence,
             "dominant_mood": self.dominant_mood.value if self.dominant_mood else None,
             "has_relevant_memory": self.has_relevant_memory,
+            "has_multimodal_context": self.has_multimodal_context,
             "memory_retrieval_ms": self.memory_retrieval_ms,
         }
 

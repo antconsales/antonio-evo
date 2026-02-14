@@ -297,6 +297,71 @@ class QdrantRAG:
             logger.error(f"Search failed: {e}")
             return []
 
+    def hybrid_search(
+        self,
+        query: str,
+        bm25_results: List[Dict[str, Any]] = None,
+        limit: int = 5,
+        bm25_weight: float = 0.3,
+        vector_weight: float = 0.7,
+    ) -> List[SearchResult]:
+        """
+        Hybrid search combining vector similarity with BM25 results (v8.0).
+
+        Uses Reciprocal Rank Fusion (RRF) to merge vector and BM25 result lists.
+
+        Args:
+            query: Search query
+            bm25_results: List of dicts with 'text' and 'source' from BM25 memory search
+            limit: Maximum results
+            bm25_weight: Weight for BM25 scores in fusion
+            vector_weight: Weight for vector scores in fusion
+
+        Returns:
+            Fused list of SearchResult ordered by combined score
+        """
+        # Get vector results
+        vector_results = self.search(query, limit=limit * 2)
+
+        if not bm25_results:
+            return vector_results[:limit]
+
+        # RRF constant (standard value)
+        k = 60
+
+        # Score vector results with RRF
+        scored = {}
+        for rank, result in enumerate(vector_results):
+            key = f"{result.source}:{result.text[:50]}"
+            rrf_score = vector_weight / (k + rank + 1)
+            scored[key] = {
+                "result": result,
+                "score": rrf_score,
+            }
+
+        # Score BM25 results with RRF
+        for rank, bm25 in enumerate(bm25_results):
+            text = bm25.get("text", "")[:200]
+            source = bm25.get("source", "memory")
+            key = f"{source}:{text[:50]}"
+            rrf_score = bm25_weight / (k + rank + 1)
+            if key in scored:
+                scored[key]["score"] += rrf_score
+            else:
+                scored[key] = {
+                    "result": SearchResult(
+                        text=text,
+                        source=source,
+                        score=bm25.get("score", 0.5),
+                        metadata=bm25.get("metadata", {}),
+                    ),
+                    "score": rrf_score,
+                }
+
+        # Sort by fused score and return top results
+        fused = sorted(scored.values(), key=lambda x: x["score"], reverse=True)
+        return [item["result"] for item in fused[:limit]]
+
     def get_stats(self) -> Dict[str, Any]:
         """Get collection statistics."""
         if not self._client:

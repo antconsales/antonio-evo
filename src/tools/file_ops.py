@@ -17,7 +17,7 @@ DEFINITIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Absolute file path to read"},
+                "path": {"type": "string", "description": "File path to read (relative to CWD or absolute)"},
                 "offset": {"type": "integer", "description": "Line to start from (0-based, default 0)"},
                 "limit": {"type": "integer", "description": "Max lines to read (default 200)"},
             },
@@ -30,7 +30,7 @@ DEFINITIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Absolute file path to write"},
+                "path": {"type": "string", "description": "File path to write (relative to CWD or absolute)"},
                 "content": {"type": "string", "description": "Content to write to the file"},
             },
             "required": ["path", "content"],
@@ -42,7 +42,7 @@ DEFINITIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Absolute directory path to list"},
+                "path": {"type": "string", "description": "Directory path to list (use '.' for current directory, relative or absolute)"},
             },
             "required": ["path"],
         },

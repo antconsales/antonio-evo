@@ -95,12 +95,19 @@ class MistralHandler(BaseHandler):
         if not self._tool_registry or len(self._tool_registry) == 0:
             return base
 
+        import os
+        cwd = os.getcwd()
+
         tools_instruction = (
             "\n\nYou have access to tools you can call to help the user. "
             "When a question requires current information, files, code execution, or image analysis, "
             "use the appropriate tool. You can use multiple tools in sequence. "
             "After getting tool results, synthesize them into a clear response. "
             "Do NOT mention that you're using tools unless the user asks."
+            f"\n\nIMPORTANT: The current working directory is: {cwd}\n"
+            "For file operations, use relative paths (e.g. 'README.md', 'src/main.py') or "
+            "absolute paths starting with the CWD. Use 'list_directory' with path '.' to see "
+            "available files. For code execution, the code runs in the CWD."
         )
         return base + tools_instruction
 

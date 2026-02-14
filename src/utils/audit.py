@@ -4,9 +4,14 @@ Audit Logger - Persistent logging of all decisions with cryptographic hashing.
 Every request, decision, and response is logged with a cryptographic hash chain.
 This ensures tamper detection - any modification to historical entries breaks the chain.
 
+v8.5: External digest file (logs/audit_digest.sha256) for independent verification.
+The agent writes to this file but never reads it during operation — it exists
+solely for external monitoring tools to `tail -f` and verify integrity.
+
 Design principles:
 - Append-only (never modify existing entries)
 - Hash-chained (each entry references previous)
+- External digest for independent verification
 - Fail-safe (errors don't crash the system)
 - Deterministic hashing
 """
@@ -420,7 +425,7 @@ class AuditLogger:
 
     def _write(self, entry: AuditEntry) -> bool:
         """
-        Write entry to log file.
+        Write entry to log file and external digest.
 
         Checks for rotation before writing.
 
@@ -436,6 +441,10 @@ class AuditLogger:
 
             with open(self.log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
+
+            # Write external digest (v8.5)
+            self._write_digest(entry)
+
             return True
         except IOError as e:
             # Log errors should not crash the system
@@ -443,6 +452,21 @@ class AuditLogger:
             import sys
             print(f"[AUDIT WARNING] Failed to write log: {e}", file=sys.stderr)
             return False
+
+    def _write_digest(self, entry: AuditEntry) -> None:
+        """
+        Append entry summary to external digest file (v8.5).
+
+        Format: sequence|timestamp_iso|event_type|entry_hash
+        Designed for external monitoring: `tail -f logs/audit_digest.sha256`
+        The agent writes here but never reads during operation.
+        """
+        digest_path = os.path.join(os.path.dirname(self.log_path), "audit_digest.sha256")
+        try:
+            with open(digest_path, "a", encoding="utf-8") as f:
+                f.write(f"{entry.sequence}|{entry.timestamp_iso}|{entry.event_type}|{entry.entry_hash}\n")
+        except IOError:
+            pass  # Non-critical — digest is supplementary
 
     def get_recent(self, n: int = 10) -> List[AuditEntry]:
         """
@@ -643,3 +667,147 @@ class AuditLogger:
                 reason=VerificationFailureReason.HASH_MISMATCH.value,
                 entries_checked=0,
             )
+
+    # ---- Governance Audit (v8.5) ----
+
+    def log_governance_event(self, decision_dict: Dict[str, Any]) -> Optional[AuditEntry]:
+        """
+        Log a governance decision to the audit chain.
+
+        Args:
+            decision_dict: GovernanceDecision.to_dict() output
+
+        Returns:
+            AuditEntry or None if logging failed
+        """
+        return self.log_event("governance_decision", {
+            "action_id": decision_dict.get("action_id"),
+            "tool_name": decision_dict.get("classification", {}).get("tool_name"),
+            "risk_level": decision_dict.get("classification", {}).get("level"),
+            "status": decision_dict.get("status"),
+            "approved_by": decision_dict.get("approved_by"),
+            "reasons": decision_dict.get("classification", {}).get("reasons", []),
+        })
+
+    def verify_digest(self) -> Dict[str, Any]:
+        """
+        Verify external digest against main audit log (v8.5).
+
+        Compares each digest line against the corresponding audit entry.
+        Designed to be called by external verification processes.
+
+        Returns:
+            Dict with valid, entries_checked, mismatches
+        """
+        digest_path = os.path.join(os.path.dirname(self.log_path), "audit_digest.sha256")
+        result = {"valid": True, "entries_checked": 0, "mismatches": []}
+
+        try:
+            if not os.path.exists(digest_path):
+                return {**result, "error": "digest_not_found"}
+
+            # Load all audit entry hashes by sequence
+            audit_hashes = {}
+            if os.path.exists(self.log_path):
+                with open(self.log_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            try:
+                                data = json.loads(line)
+                                audit_hashes[data.get("sequence", 0)] = data.get("entry_hash", "")
+                            except json.JSONDecodeError:
+                                continue
+
+            # Compare digest entries
+            with open(digest_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split("|", 3)
+                    if len(parts) < 4:
+                        continue
+                    try:
+                        seq = int(parts[0])
+                        digest_hash = parts[3]
+                        result["entries_checked"] += 1
+
+                        audit_hash = audit_hashes.get(seq)
+                        if audit_hash is None:
+                            result["valid"] = False
+                            result["mismatches"].append({
+                                "sequence": seq, "reason": "missing_in_audit"
+                            })
+                        elif audit_hash != digest_hash:
+                            result["valid"] = False
+                            result["mismatches"].append({
+                                "sequence": seq, "reason": "hash_mismatch"
+                            })
+                    except (ValueError, IndexError):
+                        continue
+
+        except IOError as e:
+            result["valid"] = False
+            result["error"] = str(e)
+
+        return result
+
+    def get_digest_tail(self, n: int = 20) -> List[str]:
+        """Get last N lines from the external digest file."""
+        digest_path = os.path.join(os.path.dirname(self.log_path), "audit_digest.sha256")
+        try:
+            if not os.path.exists(digest_path):
+                return []
+            with open(digest_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                return [line.strip() for line in lines[-n:] if line.strip()]
+        except IOError:
+            return []
+
+    def get_governance_summary(self, hours: int = 24) -> Dict[str, Any]:
+        """
+        Aggregate governance activity from audit log (v8.5).
+
+        Args:
+            hours: Look back period in hours
+
+        Returns:
+            Dict with counts by risk level, status, and autonomy ratio
+        """
+        cutoff = time.time() - (hours * 3600)
+        summary = {
+            "period_hours": hours,
+            "total": 0,
+            "by_risk_level": {},
+            "by_status": {},
+            "autonomy_ratio": 0.0,
+        }
+
+        try:
+            entries = self.get_all()
+            gov_entries = [
+                e for e in entries
+                if e.event_type == "governance_decision" and e.timestamp >= cutoff
+            ]
+
+            summary["total"] = len(gov_entries)
+            auto_count = 0
+
+            for entry in gov_entries:
+                risk = entry.payload.get("risk_level", "unknown")
+                status = entry.payload.get("status", "unknown")
+                approved_by = entry.payload.get("approved_by", "")
+
+                summary["by_risk_level"][risk] = summary["by_risk_level"].get(risk, 0) + 1
+                summary["by_status"][status] = summary["by_status"].get(status, 0) + 1
+
+                if approved_by == "auto":
+                    auto_count += 1
+
+            if summary["total"] > 0:
+                summary["autonomy_ratio"] = round(auto_count / summary["total"], 2)
+
+        except Exception:
+            pass
+
+        return summary

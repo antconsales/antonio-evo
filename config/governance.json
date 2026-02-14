@@ -1,0 +1,32 @@
+{
+  "tool_risk_levels": {
+    "web_search": "low",
+    "knowledge_search": "low",
+    "knowledge_graph": "low",
+    "read_file": "low",
+    "list_directory": "low",
+    "analyze_image": "low",
+    "write_file": "medium",
+    "create_action_plan": "medium",
+    "execute_code": "high"
+  },
+  "argument_escalation_rules": [
+    {"pattern": "rm -rf|del /s /q|rmdir /s|remove-item.*-recurse", "field": "code", "escalate_to": "critical"},
+    {"pattern": "format |mkfs|diskpart", "field": "code", "escalate_to": "critical"},
+    {"pattern": "\\.env|\\.ssh|\\.gnupg|credentials|password|token|secret|api_key|private_key", "field": "*", "escalate_to": "critical"},
+    {"pattern": "shutdown|reboot|restart-computer", "field": "code", "escalate_to": "critical"},
+    {"pattern": "pip install|npm install|choco install|winget install", "field": "code", "escalate_to": "high"},
+    {"pattern": "C:\\\\Windows|/etc/|/usr/|System32", "field": "*", "escalate_to": "high"},
+    {"pattern": "net user|net localgroup|reg delete|reg add", "field": "code", "escalate_to": "critical"}
+  ],
+  "auto_approve": {
+    "low": true,
+    "medium_delay_secs": 0,
+    "high": false,
+    "critical": false
+  },
+  "rate_escalation": {
+    "max_actions_per_minute": 15,
+    "escalate_to": "medium"
+  }
+}

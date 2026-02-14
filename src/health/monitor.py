@@ -32,6 +32,8 @@ class HealthMonitor:
         personality_engine=None,
         digital_twin=None,
         llm_manager=None,
+        governance_engine=None,
+        dashboard_service=None,
     ):
         self.router = router
         self.profile_manager = profile_manager
@@ -45,6 +47,8 @@ class HealthMonitor:
         self.personality_engine = personality_engine
         self.digital_twin = digital_twin
         self.llm_manager = llm_manager
+        self.governance_engine = governance_engine
+        self.dashboard_service = dashboard_service
 
     def check(self) -> Dict[str, Any]:
         """
@@ -145,5 +149,25 @@ class HealthMonitor:
                 result["llm_manager"] = {"enabled": True, "error": "Failed to get stats"}
         else:
             result["llm_manager"] = {"enabled": False}
+
+        # Add Governance Engine status (v8.5)
+        if self.governance_engine:
+            try:
+                gov_stats = self.governance_engine.get_stats()
+                result["governance"] = gov_stats
+            except Exception:
+                result["governance"] = {"enabled": True, "error": "Failed to get stats"}
+        else:
+            result["governance"] = {"enabled": False}
+
+        # Add Dashboard status (v8.5)
+        if self.dashboard_service:
+            try:
+                dash_stats = self.dashboard_service.get_stats()
+                result["dashboard"] = dash_stats
+            except Exception:
+                result["dashboard"] = {"enabled": True, "error": "Failed to get stats"}
+        else:
+            result["dashboard"] = {"enabled": False}
 
         return result

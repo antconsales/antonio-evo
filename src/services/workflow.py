@@ -1,8 +1,9 @@
 """
-Workflow Orchestrator (v8.0) — Multi-step action plans with scheduled tasks.
+Workflow Orchestrator (v8.5) — Multi-step action plans with retries and timeouts.
 
 Provides:
 - ActionPlan creation with sequential steps
+- Per-step timeout enforcement and configurable retries
 - User approval before execution
 - Step-by-step execution via ToolExecutor
 - Scheduled task support (daily, hourly, weekly)
@@ -13,6 +14,7 @@ import logging
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Callable
 from pathlib import Path
@@ -30,6 +32,8 @@ class ActionStep:
     depends_on: Optional[int] = None
     status: str = "pending"  # pending, running, completed, failed, skipped
     result: Optional[str] = None
+    timeout_secs: int = 60
+    max_retries: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -40,6 +44,8 @@ class ActionStep:
             "depends_on": self.depends_on,
             "status": self.status,
             "result": self.result[:200] if self.result else None,
+            "timeout_secs": self.timeout_secs,
+            "max_retries": self.max_retries,
         }
 
 
@@ -156,6 +162,8 @@ class WorkflowOrchestrator:
                 arguments=s.get("arguments", {}),
                 description=s.get("description", ""),
                 depends_on=s.get("depends_on"),
+                timeout_secs=s.get("timeout_secs", 60),
+                max_retries=s.get("max_retries", 1),
             ))
 
         plan = ActionPlan(
@@ -220,6 +228,7 @@ class WorkflowOrchestrator:
 
         results = []
         all_ok = True
+        _executor_pool = ThreadPoolExecutor(max_workers=1)
 
         for step in plan.steps:
             # Check dependency
@@ -237,26 +246,45 @@ class WorkflowOrchestrator:
                 except Exception:
                     pass
 
-            try:
-                tool_result = self.tool_executor.execute(
-                    step.tool_name, step.arguments
-                )
-                step.result = tool_result.output[:1000] if tool_result.output else ""
-                step.status = "completed" if tool_result.success else "failed"
-                if not tool_result.success:
-                    all_ok = False
-                results.append(f"Step {step.step_number}: {step.status}")
-            except Exception as e:
-                step.status = "failed"
-                step.result = str(e)[:500]
+            # Retry loop with timeout (v8.5)
+            attempts = max(step.max_retries, 1)
+            for attempt in range(1, attempts + 1):
+                try:
+                    future = _executor_pool.submit(
+                        self.tool_executor.execute, step.tool_name, step.arguments
+                    )
+                    tool_result = future.result(timeout=step.timeout_secs)
+
+                    step.result = tool_result.output[:1000] if tool_result.output else ""
+                    step.status = "completed" if tool_result.success else "failed"
+                    if tool_result.success:
+                        break  # Success — exit retry loop
+                    if attempt < attempts:
+                        logger.info(f"Step {step.step_number} failed (attempt {attempt}/{attempts}), retrying...")
+                        continue
+                except FuturesTimeout:
+                    step.status = "failed"
+                    step.result = f"Timeout after {step.timeout_secs}s (attempt {attempt}/{attempts})"
+                    logger.warning(f"Step {step.step_number} timed out after {step.timeout_secs}s")
+                    if attempt < attempts:
+                        continue
+                except Exception as e:
+                    step.status = "failed"
+                    step.result = str(e)[:500]
+                    if attempt < attempts:
+                        continue
+
+            if step.status != "completed":
                 all_ok = False
-                results.append(f"Step {step.step_number}: failed ({e})")
+            results.append(f"Step {step.step_number}: {step.status}")
 
             if callback:
                 try:
                     callback(step.step_number, step.status, step.result)
                 except Exception:
                     pass
+
+        _executor_pool.shutdown(wait=False)
 
         # Finalize
         plan.status = "completed" if all_ok else "failed"
@@ -469,6 +497,8 @@ class WorkflowOrchestrator:
                 depends_on=s.get("depends_on"),
                 status=s.get("status", "pending"),
                 result=s.get("result"),
+                timeout_secs=s.get("timeout_secs", 60),
+                max_retries=s.get("max_retries", 1),
             )
             for s in steps_data
         ]

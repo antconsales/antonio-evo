@@ -1,9 +1,13 @@
 """
-Plugin Manager — Extensibility framework for Antonio Evo (v6.0).
+Plugin Manager — Extensibility framework for Antonio Evo (v6.0, v8.5).
 
 Plugins are Python files in the `plugins/` directory that export a
 `register(plugin_manager)` function. This function receives the
 PluginManager and can register tools, hooks, and channels.
+
+v8.5: Optional `.manifest.json` support for verified skills.
+If a manifest exists alongside a plugin, SkillVerifier validates
+integrity, permissions, and source safety before loading.
 
 Example plugin (plugins/hello.py):
 ```python
@@ -20,7 +24,9 @@ def register(pm):
 
 import importlib
 import importlib.util
+import json
 import logging
+import time
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional, List
 
@@ -39,11 +45,13 @@ class PluginManager:
     - Channels (messaging platform integrations)
     """
 
-    def __init__(self, tool_registry=None, hook_registry: Optional[HookRegistry] = None):
+    def __init__(self, tool_registry=None, hook_registry: Optional[HookRegistry] = None,
+                 skill_verifier=None):
         self._tool_registry = tool_registry
         self._hook_registry = hook_registry or HookRegistry()
         self._channels: Dict[str, Any] = {}
         self._loaded_plugins: List[str] = []
+        self._skill_verifier = skill_verifier
 
     @property
     def hook_registry(self) -> HookRegistry:
@@ -118,6 +126,7 @@ class PluginManager:
         Discover and load plugins from a directory.
 
         Each .py file in the directory should export a `register(plugin_manager)` function.
+        v8.5: If a .manifest.json exists alongside the .py file, verify before loading.
 
         Args:
             plugins_dir: Path to plugins directory
@@ -135,8 +144,33 @@ class PluginManager:
             if plugin_file.name.startswith("_"):
                 continue
 
+            plugin_name = plugin_file.stem
+
+            # v8.5: Check for manifest and verify if SkillVerifier available
+            manifest_path = plugin_file.with_suffix(".manifest.json")
+            manifest = None
+            if manifest_path.exists() and self._skill_verifier:
+                try:
+                    from .manifest import SkillManifest
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        manifest_data = json.load(f)
+                    manifest = SkillManifest.from_dict(manifest_data)
+                    manifest.source_path = str(plugin_file)
+
+                    # Verify before loading
+                    verified, reason = self._skill_verifier.verify_skill(plugin_file, manifest)
+                    if not verified:
+                        logger.warning(f"Skill {plugin_name} verification failed: {reason}")
+                        continue  # Skip unverified plugin
+
+                    manifest.verified = True
+                    manifest.verified_at = time.time()
+                    logger.info(f"Skill {plugin_name} verified: {reason}")
+                except Exception as e:
+                    logger.warning(f"Manifest processing failed for {plugin_name}: {e}")
+                    continue
+
             try:
-                plugin_name = plugin_file.stem
                 spec = importlib.util.spec_from_file_location(
                     f"plugins.{plugin_name}", plugin_file
                 )
@@ -149,6 +183,10 @@ class PluginManager:
                         self._loaded_plugins.append(plugin_name)
                         loaded += 1
                         logger.info(f"Plugin loaded: {plugin_name}")
+
+                        # Register verified skill in database (v8.5)
+                        if manifest and self._skill_verifier:
+                            self._skill_verifier.register_skill(manifest)
                     else:
                         logger.warning(f"Plugin {plugin_name} has no register() function")
 

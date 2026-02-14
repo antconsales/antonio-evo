@@ -1,0 +1,20 @@
+{
+  "workspace_dir": "~/Documents/antonio-workspace",
+  "max_output_bytes": 50000,
+  "timeout_secs": 30,
+  "allowed_write_dirs": ["~/Documents/antonio-workspace", "~/Downloads"],
+  "blocked_commands": [
+    "rm -rf /", "rm -rf ~", "rm -rf .", "format", "shutdown", "reboot",
+    "net user", "net localgroup", "reg delete", "reg add",
+    "diskpart", "bcdedit", "schtasks /delete"
+  ],
+  "blocked_read_patterns": [
+    "\\.env", "\\.ssh", "credentials", "password", "token", "api_key",
+    "secret", "\\.aws", "\\.azure", "\\.gcp"
+  ],
+  "blocked_code_patterns": [
+    "os\\.remove.*\\.env", "shutil\\.rmtree", "subprocess\\..*shell.*True",
+    "__import__\\(.*subprocess", "exec\\(.*compile"
+  ],
+  "allow_network": true
+}

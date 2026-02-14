@@ -171,6 +171,10 @@ class Orchestrator:
         self.prompt_library = None
         # Workflow Orchestrator (v8.0)
         self.workflow_orchestrator = None
+        # Governance Engine (v8.5)
+        self.governance_engine = None
+        # Dashboard Service (v8.5)
+        self.dashboard_service = None
         if self.memory_enabled:
             self._init_knowledge_graph(db_path)
             self._init_self_improvement(db_path)
@@ -223,6 +227,10 @@ class Orchestrator:
         self.tool_executor = None
         self._init_tools()
 
+        # Governance Engine (v8.5 — needs tool_executor)
+        if self.memory_enabled:
+            self._init_governance(db_path)
+
         # Initialize plugins after tools (so plugins can register tools)
         self._init_plugins()
 
@@ -264,6 +272,10 @@ class Orchestrator:
         if self.workflow_orchestrator and self.proactive_service:
             self.proactive_service.set_workflow_orchestrator(self.workflow_orchestrator)
 
+        # Dashboard Service (v8.5 — needs governance, workflow, audit)
+        if self.memory_enabled:
+            self._init_dashboard(db_path)
+
         # Health Monitor (all dependencies injected)
         self.health_monitor = HealthMonitor(
             router=self.router,
@@ -278,6 +290,8 @@ class Orchestrator:
             personality_engine=self.personality_engine,
             digital_twin=self.digital_twin,
             llm_manager=self.llm_manager,
+            governance_engine=self.governance_engine,
+            dashboard_service=self.dashboard_service,
         )
 
     def _init_knowledge_graph(self, db_path: str) -> None:
@@ -330,6 +344,39 @@ class Orchestrator:
         except Exception as e:
             logger.warning(f"Failed to initialize Workflow: {e}")
             self.workflow_orchestrator = None
+
+    def _init_governance(self, db_path: str) -> None:
+        """Initialize Governance Engine (v8.5). Called after tool system."""
+        try:
+            from .services.governance import GovernanceEngine
+            self.governance_engine = GovernanceEngine(
+                db_path=db_path,
+                config_path="config/governance.json",
+            )
+            # Inject into ToolExecutor for automatic gating
+            if self.tool_executor:
+                self.tool_executor.set_governance(self.governance_engine)
+            logger.info("Governance Engine (v8.5) initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Governance Engine: {e}")
+            self.governance_engine = None
+
+    def _init_dashboard(self, db_path: str) -> None:
+        """Initialize Dashboard Service (v8.5). Called after governance and workflow."""
+        try:
+            from .services.dashboard import DashboardService
+            self.dashboard_service = DashboardService(
+                db_path=db_path,
+                governance=self.governance_engine,
+                workflow=self.workflow_orchestrator,
+                audit=self.audit,
+                self_improvement=self.self_improvement,
+                memory_storage=self.memory_storage,
+            )
+            logger.info("Dashboard Service (v8.5) initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Dashboard: {e}")
+            self.dashboard_service = None
 
     def _init_warmup(self) -> None:
         """Initialize Ollama warm-up service."""
@@ -488,14 +535,26 @@ class Orchestrator:
             logger.warning(f"Failed to initialize channels: {e}")
 
     def _init_plugins(self) -> None:
-        """Initialize Plugin System (v6.0) - extensibility framework."""
+        """Initialize Plugin System (v6.0, v8.5) - extensibility framework with skill verification."""
         try:
             from .plugins import PluginManager, HookRegistry
+
+            # v8.5: Initialize SkillVerifier for manifest-based plugin verification
+            skill_verifier = None
+            try:
+                from .plugins.manifest import SkillVerifier
+                skill_verifier = SkillVerifier(
+                    db_path="data/evomemory.db",
+                    whitelist_path="config/skill_whitelist.json",
+                )
+            except Exception as e:
+                logger.debug(f"SkillVerifier not available: {e}")
 
             self.hook_registry = HookRegistry()
             self.plugin_manager = PluginManager(
                 tool_registry=self.tool_registry,
                 hook_registry=self.hook_registry,
+                skill_verifier=skill_verifier,
             )
 
             # Load plugins from plugins/ directory
@@ -503,14 +562,14 @@ class Orchestrator:
 
             # Emit startup hook
             self.hook_registry.emit("on_startup", {
-                "version": "6.0",
+                "version": "8.5",
                 "tools": len(self.tool_registry) if self.tool_registry else 0,
             })
 
             if loaded > 0:
-                logger.info(f"Plugin System (v6.0): {loaded} plugins loaded")
+                logger.info(f"Plugin System (v8.5): {loaded} plugins loaded")
             else:
-                logger.info("Plugin System (v6.0) initialized (no plugins)")
+                logger.info("Plugin System (v8.5) initialized (no plugins)")
 
         except Exception as e:
             logger.warning(f"Failed to initialize Plugin System: {e}")

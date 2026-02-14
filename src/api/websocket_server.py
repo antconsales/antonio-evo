@@ -18,6 +18,7 @@ Endpoints:
 - POST /api/generate: Z-Image generation
 - POST /api/analyze-image: CLIP image analysis
 - POST /api/rag/*: RAG document search
+- GET /api/governance/*: Governance engine (v8.5)
 """
 
 import asyncio
@@ -2149,6 +2150,166 @@ def create_app() -> "FastAPI":
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    @app.get("/api/audit/verify")
+    async def verify_audit_chain():
+        """Full hash chain verification (v8.5)."""
+        try:
+            chain_result = orchestrator.audit.verify_chain()
+            digest_result = orchestrator.audit.verify_digest()
+            return {
+                "success": True,
+                "chain": chain_result.to_dict(),
+                "digest": digest_result,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/audit/digest")
+    async def get_audit_digest(limit: int = 20):
+        """Get last N digest entries (v8.5)."""
+        try:
+            lines = orchestrator.audit.get_digest_tail(limit)
+            return {"success": True, "digest": lines}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/audit/governance-summary")
+    async def get_audit_governance_summary(hours: int = 24):
+        """Governance activity summary from audit log (v8.5)."""
+        try:
+            summary = orchestrator.audit.get_governance_summary(hours)
+            return {"success": True, **summary}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ===================
+    # Governance API (v8.5)
+    # ===================
+
+    @app.get("/api/governance/pending")
+    async def get_governance_pending():
+        """Get all actions waiting for human approval."""
+        if not orchestrator.governance_engine:
+            return {"success": False, "error": "Governance engine not initialized"}
+        try:
+            pending = orchestrator.governance_engine.get_pending_approvals()
+            return {"success": True, "pending": pending}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/governance/{action_id}/approve")
+    async def approve_governance_action(action_id: str):
+        """Approve a pending governance action."""
+        if not orchestrator.governance_engine:
+            raise HTTPException(status_code=503, detail="Governance engine not initialized")
+        try:
+            ok = orchestrator.governance_engine.approve(action_id, approved_by="user")
+            if ok:
+                return {"success": True, "action_id": action_id, "status": "approved"}
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found or not pending")
+        except HTTPException:
+            raise
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/governance/{action_id}/deny")
+    async def deny_governance_action(action_id: str, reason: str = ""):
+        """Deny a pending governance action."""
+        if not orchestrator.governance_engine:
+            raise HTTPException(status_code=503, detail="Governance engine not initialized")
+        try:
+            ok = orchestrator.governance_engine.deny(action_id, reason=reason)
+            if ok:
+                return {"success": True, "action_id": action_id, "status": "denied"}
+            raise HTTPException(status_code=404, detail=f"Action {action_id} not found or not pending")
+        except HTTPException:
+            raise
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/governance/stats")
+    async def get_governance_stats():
+        """Governance statistics — risk distribution, autonomy ratio, pending count."""
+        if not orchestrator.governance_engine:
+            return {"success": False, "error": "Governance engine not initialized"}
+        try:
+            stats = orchestrator.governance_engine.get_stats()
+            return {"success": True, **stats}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/governance/history")
+    async def get_governance_history(limit: int = 20, risk_level: Optional[str] = None):
+        """Recent governance decisions with optional risk level filter."""
+        if not orchestrator.governance_engine:
+            return {"success": False, "error": "Governance engine not initialized"}
+        try:
+            history = orchestrator.governance_engine.get_history(
+                limit=limit, risk_level=risk_level
+            )
+            return {"success": True, "history": history}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ===================
+    # Dashboard API (v8.5)
+    # ===================
+
+    @app.get("/api/dashboard/briefing")
+    async def get_dashboard_briefing(style: str = "concise"):
+        """Natural language briefing of system status."""
+        if not orchestrator.dashboard_service:
+            return {"success": False, "error": "Dashboard service not initialized"}
+        try:
+            briefing = orchestrator.dashboard_service.get_briefing(style)
+            return {"success": True, "briefing": briefing, "style": style}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/dashboard/kpi")
+    async def get_dashboard_kpi():
+        """Current KPI snapshot."""
+        if not orchestrator.dashboard_service:
+            return {"success": False, "error": "Dashboard service not initialized"}
+        try:
+            snapshot = orchestrator.dashboard_service.capture_snapshot()
+            return {"success": True, **snapshot.to_dict()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/dashboard/autonomy")
+    async def get_dashboard_autonomy():
+        """70/30 autonomy ratio report."""
+        if not orchestrator.dashboard_service:
+            return {"success": False, "error": "Dashboard service not initialized"}
+        try:
+            report = orchestrator.dashboard_service.get_autonomy_report()
+            return {"success": True, **report}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/dashboard/trend/{metric}")
+    async def get_dashboard_trend(metric: str, days: int = 7):
+        """Historical trend for a metric."""
+        if not orchestrator.dashboard_service:
+            return {"success": False, "error": "Dashboard service not initialized"}
+        try:
+            points = orchestrator.dashboard_service.get_trend(metric, days)
+            return {"success": True, "metric": metric, "days": days, "data": points}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/dashboard/alerts")
+    async def get_dashboard_alerts():
+        """Active alerts based on threshold detection."""
+        if not orchestrator.dashboard_service:
+            return {"success": False, "error": "Dashboard service not initialized"}
+        try:
+            alerts = orchestrator.dashboard_service.check_alerts()
+            return {"success": True, "alerts": alerts, "count": len(alerts)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     # ===================
     # Consent Management
     # ===================
@@ -2440,6 +2601,66 @@ def create_app() -> "FastAPI":
         """End current session."""
         orchestrator.end_session()
         return {"success": True}
+
+    # ===================
+    # Skill Marketplace API (v8.5)
+    # ===================
+
+    @app.get("/api/skills")
+    async def get_installed_skills():
+        """List installed skills with manifests."""
+        if not (orchestrator.plugin_manager and orchestrator.plugin_manager._skill_verifier):
+            # Fallback: return basic plugin list
+            if orchestrator.plugin_manager:
+                stats = orchestrator.plugin_manager.get_stats()
+                return {"success": True, "skills": [], "plugins": stats.get("loaded_plugins", [])}
+            return {"success": False, "error": "Plugin system not initialized"}
+        try:
+            skills = orchestrator.plugin_manager._skill_verifier.get_installed_skills()
+            return {"success": True, "skills": skills}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/skills/{skill_id}")
+    async def get_skill_details(skill_id: str):
+        """Get skill details and permissions."""
+        if not (orchestrator.plugin_manager and orchestrator.plugin_manager._skill_verifier):
+            raise HTTPException(status_code=503, detail="Skill verifier not initialized")
+        try:
+            skill = orchestrator.plugin_manager._skill_verifier.get_skill(skill_id)
+            if skill:
+                return {"success": True, "skill": skill}
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id} not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.post("/api/skills/{skill_id}/revoke")
+    async def revoke_skill(skill_id: str):
+        """Revoke a skill (disable without deleting)."""
+        if not (orchestrator.plugin_manager and orchestrator.plugin_manager._skill_verifier):
+            raise HTTPException(status_code=503, detail="Skill verifier not initialized")
+        try:
+            ok = orchestrator.plugin_manager._skill_verifier.revoke_skill(skill_id)
+            if ok:
+                return {"success": True, "skill_id": skill_id, "status": "revoked"}
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id} not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @app.get("/api/skills/permissions")
+    async def get_skills_permissions():
+        """All skill permissions summary."""
+        if not (orchestrator.plugin_manager and orchestrator.plugin_manager._skill_verifier):
+            return {"success": True, "permissions": []}
+        try:
+            perms = orchestrator.plugin_manager._skill_verifier.get_all_permissions()
+            return {"success": True, "permissions": perms}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     # ===================
     # Channels API (v6.0)

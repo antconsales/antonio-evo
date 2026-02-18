@@ -1,7 +1,9 @@
 {
-  "name": "antonio-desktop",
-  "version": "1.0.0",
-  "description": "Antonio Local Orchestrator - Desktop UI",
+  "name": "antonio-evo",
+  "version": "4.0.0",
+  "description": "Local Cognitive Runtime — Deterministic AI that thinks locally, learns evolutionarily, and never phones home",
+  "homepage": "https://github.com/antconsales/antonio-evo",
+  "keywords": ["ai", "local-llm", "ollama", "privacy", "offline", "mistral", "electron", "python", "cognitive-runtime", "evolutionary-memory"],
   "main": "main.js",
   "scripts": {
     "start": "electron .",
